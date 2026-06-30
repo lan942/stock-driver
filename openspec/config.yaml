@@ -1,0 +1,89 @@
+schema: spec-driven
+
+# Project context - AI will read this before working on the project
+context: |
+  # 技术栈
+  Tech stack:
+  - Backend: Python 3.13, Flask, SQLAlchemy, SQLite
+  - Frontend: Vue 3, Element Plus, ECharts, Vite
+  - Crawler: akshare (A股数据爬取)
+  - Database: SQLite with SQLAlchemy ORM
+
+  # 项目结构
+  Project structure:
+  - backend/         # Python 后端
+    - models/        # 数据库模型 (Stock, StockDaily, StockFinancial)
+    - services/      # 业务逻辑 (crawler.py, analysis.py)
+    - api/           # Flask API 路由
+    - utils/         # 工具函数 (db.py)
+  - frontend/        # Vue 前端
+    - src/views/     # 页面组件
+    - src/components/# 通用组件
+    - src/api/       # API 调用封装
+  - data/            # SQLite 数据库文件
+
+  # 代码规范
+  Code conventions:
+  - Python: PEP 8, 使用 type hints, 私有方法用下划线前缀
+  - Vue: Composition API (<script setup>), 组件名用 PascalCase
+  - API: RESTful 风格, 返回 JSON, 错误时返回 {error: message}
+  - 数据库: 单一数据源, 避免重复爬取相同数据
+  - 命名: 变量用 snake_case, 类名用 PascalCase, 常量全大写
+
+  # Git 提交规范
+  Git commit:
+  - feat: 新功能
+  - fix: 修复 bug
+  - refactor: 重构
+  - style: 代码格式（不影响功能）
+  - test: 测试相关
+  - docs: 文档更新
+  - chore: 构建/工具相关
+
+  # 领域知识
+  Domain:
+  - A股股票数据 (沪深两市)
+  - 技术分析指标: MA, MACD, RSI, KDJ, BOLL
+  - 爬虫限制: 注意频率控制，避免被封禁
+
+# Coding 规范 - AI 在写代码前必须遵守
+coding_rules: |
+  # 设计先行原则
+  - 写任何代码前，先想清楚：模块划分、数据流、接口设计
+  - 大于 30 行的逻辑必须先拆解成步骤再写
+  - 每个新文件/模块需要说明它的职责和它与现有模块的关系
+
+  # 模块划分原则
+  - 单一职责：每个模块/函数只做一件事
+  - 清晰边界：模块间通过固定接口通信，不直接操作对方内部数据
+  - 层次分明：api -> service -> model (三层架构)
+
+  # 代码复用原则 (最重要)
+  - 看到重复代码，立即提取到公共方法/工具函数
+  - 已有功能不要重新实现：先查现有的 models/services/utils
+  - 优先扩展现有方法，而非创建新的同类方法
+  - 共用逻辑提取到 utils/ 或基类中
+
+  # 新功能原则
+  - 新功能先评估：能否复用现有模块？能否扩展现有方法？
+  - 如果只能新写，必须给出充分的理由
+  - 禁止：为了一样的逻辑写两个略有不同的方法
+
+  # 代码质量
+  - Python: type hints 必须标注，文档字符串说明参数和返回值
+  - Vue: 公共逻辑提取到 composables 或 utils，不写在组件内部
+  - 变量命名见名知意，不允许 temp1, data2 这类命名
+
+# Per-artifact rules
+rules:
+  proposal:
+    - 保持简洁，优先实现核心功能
+    - 每次迭代聚焦单一目标
+  tasks:
+    - 任务粒度控制在 2 小时内
+    - 优先完成数据流闭环（爬取→存储→展示）
+    - 技术选型优先考虑成熟稳定的方案
+  coding:
+    - 写代码前必须先说明设计思路
+    - 检查是否有现有代码可复用
+    - 禁止复制粘贴重复代码
