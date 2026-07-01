@@ -1,8 +1,9 @@
 from flask import Blueprint, request, jsonify
-from backend.services.crawler import StockCrawler
 from backend.services.analysis import StockAnalysis
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
+from backend.services.crawler.stock_list import StockListCrawler
+from backend.services.crawler.stock_realtime import StockRealtimeCrawler
 
 api = Blueprint('api', __name__)
 
@@ -143,17 +144,71 @@ def get_top_losers():
 @api.route('/crawler/update_list', methods=['POST'])
 def update_stock_list():
     db = next(get_db())
-    count = StockCrawler.save_stock_list(db)
+    crawler = StockListCrawler()
+    df = crawler.fetch_stock_list_df()
+    if df.empty:
+        return jsonify({'message': '获取股票列表失败'}), 500
+    count = 0
+    for _, row in df.iterrows():
+        code = row['code']
+        name = row['name']
+        stock = db.query(Stock).filter(Stock.code == code).first()
+        if stock:
+            stock.name = name
+        else:
+            stock = Stock(code=code, name=name)
+            db.add(stock)
+        count += 1
+    db.commit()
     return jsonify({'message': f'成功更新 {count} 只股票'})
 
 @api.route('/crawler/update_realtime', methods=['POST'])
 def update_realtime():
     db = next(get_db())
-    count = StockCrawler.update_stock_realtime(db)
+    crawler = StockRealtimeCrawler()
+    df = crawler.fetch_realtime_df()
+    if df.empty:
+        return jsonify({'message': '获取实时行情失败'}), 500
+    count = 0
+    for _, row in df.iterrows():
+        code = str(row['code'])
+        stock = db.query(Stock).filter(Stock.code == code).first()
+        if stock:
+            stock.price = row.get('close', None)
+            stock.change_percent = row.get('change_percent', None)
+            stock.volume = row.get('volume', None)
+            stock.turnover = row.get('turnover', None)
+            count += 1
+    db.commit()
     return jsonify({'message': f'成功更新 {count} 只股票实时数据'})
 
 @api.route('/crawler/fetch_daily/<code>', methods=['POST'])
 def fetch_daily(code):
+    import akshare as ak
+    from datetime import datetime
     db = next(get_db())
-    count = StockCrawler.save_stock_daily(db, code)
+    try:
+        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20250601", end_date=datetime.now().strftime('%Y%m%d'), adjust="qfq")
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    if df.empty:
+        return jsonify({'message': '没有获取到数据'}), 404
+    count = 0
+    for _, row in df.iterrows():
+        date_str = str(row['日期'])
+        date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        existing = db.query(StockDaily).filter(
+            StockDaily.code == code, StockDaily.date == date
+        ).first()
+        if not existing:
+            daily = StockDaily(
+                code=code, date=date,
+                open=row.get('开盘', None), high=row.get('最高', None),
+                low=row.get('最低', None), close=row.get('收盘', None),
+                volume=row.get('成交量', None), turnover=row.get('成交额', None),
+                change_percent=row.get('涨跌幅', None)
+            )
+            db.add(daily)
+            count += 1
+    db.commit()
     return jsonify({'message': f'成功获取 {count} 条日线数据'})
