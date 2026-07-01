@@ -8,13 +8,21 @@ logger = logging.getLogger(__name__)
 Number = Union[int, float, str, None]
 
 
+def _strip_unit_chars(value: str) -> str:
+    cleaned = value.strip().replace(",", "").replace("%", "").replace("+", "")
+    for unit in ["亿", "万", "手", "股", "元", "倍"]:
+        if cleaned.endswith(unit):
+            cleaned = cleaned[: -len(unit)]
+    return cleaned.strip()
+
+
 def _to_float(value: Number) -> Optional[float]:
     if value is None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
-        cleaned = value.strip().replace(",", "").replace("%", "").replace("+", "")
+        cleaned = _strip_unit_chars(value)
         if not cleaned:
             return None
         try:
@@ -122,8 +130,12 @@ def detect_unit_from_value(value: Any, field_name: str) -> str:
     if isinstance(value, str):
         if "%" in value:
             return "percent"
+        if "亿" in value and field_name in ("turnover", "price", "market_cap"):
+            return "yi_yuan"
         if "万" in value and field_name in ("turnover", "volume", "price"):
             return "wan_yuan"
+        if "手" in value and field_name == "volume":
+            return "hand"
 
     if isinstance(value, (int, float)):
         if field_name == "turnover_rate" and abs(value) <= 1.0 and value != 0:
@@ -162,6 +174,9 @@ def normalize_stock_realtime_data(
         "turnover": None,
         "turnover_rate": None,
         "change_percent": None,
+        "pe": None,
+        "pb": None,
+        "market_cap": None,
     }
 
     price_unit = field_units.get("price", detect_unit_from_value(
@@ -178,6 +193,9 @@ def normalize_stock_realtime_data(
     ))
     change_percent_unit = field_units.get("change_percent", detect_unit_from_value(
         row.get("涨跌幅", row.get("change_percent", None)), "change_percent"
+    ))
+    market_cap_unit = field_units.get("market_cap", detect_unit_from_value(
+        row.get("总市值", row.get("market_cap", None)), "market_cap"
     ))
 
     result["open"] = normalize_price(
@@ -203,6 +221,15 @@ def normalize_stock_realtime_data(
     )
     result["change_percent"] = normalize_change_percent(
         row.get("涨跌幅", row.get("change_percent", None)), change_percent_unit
+    )
+    result["pe"] = _to_float(
+        row.get("市盈率-动态", row.get("pe", row.get("市盈率", None)))
+    )
+    result["pb"] = _to_float(
+        row.get("市净率", row.get("pb", None))
+    )
+    result["market_cap"] = normalize_price(
+        row.get("总市值", row.get("market_cap", None)), market_cap_unit
     )
 
     return result

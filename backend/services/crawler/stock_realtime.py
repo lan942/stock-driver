@@ -11,6 +11,7 @@ from backend.services.crawler.rate_limiter import RateLimiter, RateLimitConfig
 
 logger = logging.getLogger(__name__)
 
+# 禁用新浪数据源，仅使用东方财富源（新浪缺少关键字段：换手率、市盈率、市净率、市值）
 DEFAULT_REALTIME_SOURCES = [
     {
         "name": "akshare_em_spot",
@@ -24,22 +25,7 @@ DEFAULT_REALTIME_SOURCES = [
             "change_percent": "percent",
         },
         "max_retries": 3,
-        "base_wait": 1.0,
-        "max_wait": 60.0,
-    },
-    {
-        "name": "akshare_sina_spot",
-        "type": "akshare",
-        "function": "stock_zh_a_spot",
-        "field_units": {
-            "price": "yuan",
-            "volume": "shares",
-            "turnover": "yuan",
-            "turnover_rate": "percent",
-            "change_percent": "percent",
-        },
-        "max_retries": 3,
-        "base_wait": 1.0,
+        "base_wait": 0.0,
         "max_wait": 60.0,
     },
 ]
@@ -54,9 +40,9 @@ class StockRealtimeCrawler(CrawlerBase):
         if rate_limiter is None:
             rate_limiter = RateLimiter(RateLimitConfig(
                 max_retries=3,
-                base_wait=1.0,
+                base_wait=0.0,
                 max_wait=60.0,
-                requests_per_window=10,
+                requests_per_window=60,
                 window_seconds=60.0,
             ))
         super().__init__(

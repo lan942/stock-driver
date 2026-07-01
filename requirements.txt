@@ -1,0 +1,6 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+SQLAlchemy==2.0.23
+akshare==1.12.76
+pandas==2.1.4
+APScheduler==3.10.4

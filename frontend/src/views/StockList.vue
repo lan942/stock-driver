@@ -20,11 +20,26 @@
     <el-table :data="stocks" border style="width: 100%" @row-click="goToDetail">
       <el-table-column prop="code" label="代码" width="100" />
       <el-table-column prop="name" label="名称" width="120" />
-      <el-table-column prop="price" label="价格" width="100">
+      <el-table-column prop="price" label="收盘价" width="100">
         <template #default="{ row }">
           <span :style="{ color: row.change_percent >= 0 ? '#ef4444' : '#22c55e' }">
             {{ row.price ? row.price.toFixed(2) : '-' }}
           </span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="open" label="开盘价" width="100">
+        <template #default="{ row }">
+          {{ row.open ? row.open.toFixed(2) : '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="high" label="最高价" width="100">
+        <template #default="{ row }">
+          <span style="color: #ef4444">{{ row.high ? row.high.toFixed(2) : '-' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="low" label="最低价" width="100">
+        <template #default="{ row }">
+          <span style="color: #22c55e">{{ row.low ? row.low.toFixed(2) : '-' }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="change_percent" label="涨跌幅" width="100">
@@ -35,8 +50,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="volume" label="成交量" width="120" />
+      <el-table-column prop="turnover_rate" label="换手率" width="100">
+        <template #default="{ row }">
+          {{ row.turnover_rate ? row.turnover_rate.toFixed(2) : '-' }}%
+        </template>
+      </el-table-column>
       <el-table-column prop="pe" label="市盈率" width="100" />
       <el-table-column prop="market_cap" label="总市值" width="120" />
+      <el-table-column prop="price_date" label="价格日期" width="120" />
     </el-table>
 
     <el-pagination
