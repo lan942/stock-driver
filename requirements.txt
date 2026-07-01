@@ -3,4 +3,5 @@ Flask-CORS==4.0.0
 SQLAlchemy==2.0.23
 akshare==1.12.76
 pandas==2.1.4
+requests==2.31.0
 APScheduler==3.10.4
