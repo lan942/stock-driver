@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import date, datetime
 from typing import Optional, Tuple
 
-from backend.models.stock import Stock
+from backend.models.stock import Stock, StockDaily
 from backend.models.crawl_status import CrawlStatus
 from backend.utils.db import get_db
 
@@ -38,7 +38,7 @@ def save_stock_list(df: pd.DataFrame) -> Tuple[int, int]:
 
 
 def save_realtime_quotes(df: pd.DataFrame, quote_date: Optional[date] = None) -> Tuple[int, int]:
-    """保存实时行情数据，返回(成功数, 失败数)"""
+    """保存实时行情数据到 StockDaily 表，返回(成功数, 失败数)"""
     if df.empty:
         return 0, 0
 
@@ -51,26 +51,52 @@ def save_realtime_quotes(df: pd.DataFrame, quote_date: Optional[date] = None) ->
 
     for _, row in df.iterrows():
         code = str(row['code'])
-        stock = db.query(Stock).filter(Stock.code == code).first()
-        if stock:
-            stock.price = row.get('close', None)
-            stock.open = row.get('open', None)
-            stock.high = row.get('high', None)
-            stock.low = row.get('low', None)
-            stock.change_percent = row.get('change_percent', None)
-            stock.volume = row.get('volume', None)
-            stock.turnover = row.get('turnover', None)
-            stock.turnover_rate = row.get('turnover_rate', None)
-            stock.pe = row.get('pe', None)
-            stock.pb = row.get('pb', None)
-            stock.market_cap = row.get('market_cap', None)
-            stock.price_date = quote_date
+        # 只有 Stock 表中存在的股票才写入（过滤掉已退市等）
+        if not db.query(Stock.code).filter(Stock.code == code).first():
+            fail_count += 1
+            continue
+
+        try:
+            daily = db.query(StockDaily).filter(
+                StockDaily.code == code, StockDaily.date == quote_date
+            ).first()
+            if daily:
+                daily.close = row.get('close')
+                daily.open = row.get('open')
+                daily.high = row.get('high')
+                daily.low = row.get('low')
+                daily.change_percent = row.get('change_percent')
+                daily.volume = row.get('volume')
+                daily.turnover = row.get('turnover')
+                daily.turnover_rate = row.get('turnover_rate')
+                daily.pe = row.get('pe')
+                daily.pb = row.get('pb')
+                daily.market_cap = row.get('market_cap')
+            else:
+                daily = StockDaily(
+                    code=code,
+                    date=quote_date,
+                    close=row.get('close'),
+                    open=row.get('open'),
+                    high=row.get('high'),
+                    low=row.get('low'),
+                    change_percent=row.get('change_percent'),
+                    volume=row.get('volume'),
+                    turnover=row.get('turnover'),
+                    turnover_rate=row.get('turnover_rate'),
+                    pe=row.get('pe'),
+                    pb=row.get('pb'),
+                    market_cap=row.get('market_cap'),
+                )
+                db.add(daily)
             success_count += 1
-        else:
+        except Exception as e:
+            logger.warning(f"保存 {code} 行情失败: {e}")
             fail_count += 1
 
     db.commit()
     db.close()
+    logger.info(f"StockDaily 写入完成: 成功 {success_count}, 失败 {fail_count}, 日期 {quote_date}")
     return success_count, fail_count
 
 

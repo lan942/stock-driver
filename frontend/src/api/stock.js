@@ -25,10 +25,13 @@ export const stockAPI = {
     return api.get('/stocks/top/losers', { params: { limit } })
   },
   updateStockList() {
-    return api.post('/crawler/update_list')
+    return api.post('/crawler/update_list', {}, { timeout: 180000 })
   },
-  updateRealtime() {
-    return api.post('/crawler/update_realtime')
+  updateRealtime(params = {}) {
+    return api.post('/crawler/update_realtime', {
+      force: params.force !== undefined ? params.force : true,
+      date: params.date || null
+    }, { timeout: 180000 })
   },
   fetchDaily(code) {
     return api.post(`/crawler/fetch_daily/${code}`)

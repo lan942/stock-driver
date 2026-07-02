@@ -39,6 +39,9 @@ class StockDaily(Base):
     turnover = Column(Float)
     turnover_rate = Column(Float)
     change_percent = Column(Float)
+    pe = Column(Float)
+    pb = Column(Float)
+    market_cap = Column(Float)
     created_at = Column(DateTime, server_default=func.now())
     
     __table_args__ = (

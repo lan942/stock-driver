@@ -13,28 +13,13 @@ from backend.services.crawler.rate_limiter import RateLimiter, RateLimitConfig
 
 logger = logging.getLogger(__name__)
 
-# 主源：akshare 封装的东方财富接口；备用源：直连东方财富 push2 API
-# akshare 失败时由 base.py 的多源切换逻辑自动切换到直连接口
+# 主源：直连东方财富 push2 API；备用源：akshare 封装的东方财富接口
+# 直连源失败时由 base.py 的多源切换逻辑自动切换到 akshare
 DEFAULT_REALTIME_SOURCES = [
-    {
-        "name": "akshare_em_spot",
-        "type": "akshare",
-        "function": "stock_zh_a_spot_em",
-        "field_units": {
-            "price": "yuan",
-            "volume": "shares",
-            "turnover": "yuan",
-            "turnover_rate": "percent",
-            "change_percent": "percent",
-        },
-        "max_retries": 3,
-        "base_wait": 0.0,
-        "max_wait": 60.0,
-    },
     {
         "name": "eastmoney_direct_http",
         "type": "direct_http",
-        "url": "https://82.push2.eastmoney.com/api/qt/clist/get",
+        "url": "https://push2.eastmoney.com/api/qt/clist/get",
         "params": {
             "pn": 1,
             "pz": 100,
@@ -77,6 +62,21 @@ DEFAULT_REALTIME_SOURCES = [
         "http_retry_wait": 1.0,
         "timeout": 30,
         "page_sleep": 0.8,
+    },
+    {
+        "name": "akshare_em_spot",
+        "type": "akshare",
+        "function": "stock_zh_a_spot_em",
+        "field_units": {
+            "price": "yuan",
+            "volume": "shares",
+            "turnover": "yuan",
+            "turnover_rate": "percent",
+            "change_percent": "percent",
+        },
+        "max_retries": 3,
+        "base_wait": 0.0,
+        "max_wait": 60.0,
     },
 ]
 

@@ -1,6 +1,19 @@
 <template>
   <div class="stock-list">
     <div class="search-bar">
+      <div class="date-selector">
+        <span class="date-label">数据日期：</span>
+        <el-date-picker
+          v-model="queryDate"
+          type="date"
+          placeholder="选择日期"
+          format="YYYY-MM-DD"
+          value-format="YYYY-MM-DD"
+          @change="onDateChange"
+          size="default"
+        />
+        <el-button v-if="queryDate" size="small" @click="clearDate">显示最新</el-button>
+      </div>
       <el-input
         v-model="searchForm.name"
         placeholder="搜索股票名称"
@@ -15,6 +28,10 @@
       />
       <el-button type="primary" @click="loadStocks">搜索</el-button>
       <el-button @click="resetSearch">重置</el-button>
+    </div>
+
+    <div v-if="priceDate" class="current-date-info">
+      当前显示：{{ priceDate }} 的行情数据
     </div>
 
     <el-table :data="stocks" border style="width: 100%" @row-click="goToDetail">
@@ -79,6 +96,8 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const stocks = ref([])
+const queryDate = ref('')
+const priceDate = ref('')
 const searchForm = reactive({
   name: '',
   code: ''
@@ -96,12 +115,29 @@ const loadStocks = async () => {
       per_page: pagination.per_page,
       ...searchForm
     }
+    if (queryDate.value) {
+      params.date = queryDate.value
+    }
     const response = await stockAPI.getStocks(params)
     stocks.value = response.data.data
     pagination.total = response.data.total
+    if (response.data.price_date) {
+      priceDate.value = response.data.price_date
+    }
   } catch (error) {
     console.error('加载股票列表失败:', error)
   }
+}
+
+const onDateChange = () => {
+  pagination.page = 1
+  loadStocks()
+}
+
+const clearDate = () => {
+  queryDate.value = ''
+  pagination.page = 1
+  loadStocks()
 }
 
 const resetSearch = () => {
@@ -129,8 +165,30 @@ onMounted(() => {
 .search-bar {
   display: flex;
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.date-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-label {
+  font-size: 14px;
+  color: #606266;
+  white-space: nowrap;
+}
+
+.current-date-info {
+  margin-bottom: 12px;
+  padding: 6px 12px;
+  background: #ecf5ff;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #409eff;
 }
 
 .search-input {

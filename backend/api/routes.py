@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
-from datetime import datetime
+import time
+from datetime import date, datetime
 from backend.services.analysis import StockAnalysis
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
@@ -10,37 +11,38 @@ from backend.services.stock_service import (
     save_stock_list,
     save_realtime_quotes,
     record_crawl_status,
+    has_today_success_record,
 )
 from backend.services.scheduler import get_scheduler
 
 api = Blueprint('api', __name__)
 
 
-@api.route('/stocks', methods=['GET'])
-def get_stocks():
+def _build_daily_result(d, stock):
+    return {
+        'id': stock.id if stock else None,
+        'code': d.code,
+        'name': stock.name if stock else '',
+        'price_date': d.date.strftime('%Y-%m-%d') if d.date else None,
+        'price': d.close,
+        'open': d.open,
+        'high': d.high,
+        'low': d.low,
+        'change_percent': d.change_percent,
+        'volume': d.volume,
+        'turnover': d.turnover,
+        'turnover_rate': d.turnover_rate,
+        'pe': d.pe,
+        'pb': d.pb,
+        'market_cap': d.market_cap,
+    }
+
+
+def _get_stocks_fallback(page, per_page):
+    """回退：StockDaily 表无数据时查 Stock 表"""
     db = next(get_db())
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-
-    filters = {}
-    if 'name' in request.args:
-        filters['name'] = request.args['name']
-    if 'code' in request.args:
-        filters['code'] = request.args['code']
-    if 'industry' in request.args:
-        filters['industry'] = request.args['industry']
-    if 'min_price' in request.args:
-        filters['min_price'] = request.args['min_price']
-    if 'max_price' in request.args:
-        filters['max_price'] = request.args['max_price']
-
-    stocks = StockAnalysis.filter_stocks(db, filters)
-
-    total = len(stocks)
-    start = (page - 1) * per_page
-    end = start + per_page
-    paginated_stocks = stocks[start:end]
-
+    stocks = db.query(Stock).order_by(Stock.code).offset((page - 1) * per_page).limit(per_page).all()
+    total = db.query(Stock).count()
     result = [{
         'id': s.id,
         'code': s.code,
@@ -58,14 +60,55 @@ def get_stocks():
         'turnover_rate': s.turnover_rate,
         'pe': s.pe,
         'pb': s.pb,
-        'market_cap': s.market_cap
-    } for s in paginated_stocks]
-
+        'market_cap': s.market_cap,
+    } for s in stocks]
+    db.close()
     return jsonify({
         'data': result,
         'total': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+    })
+
+
+@api.route('/stocks', methods=['GET'])
+def get_stocks():
+    from backend.models.stock import StockDaily
+    from sqlalchemy import func
+
+    db = next(get_db())
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    query_date = request.args.get('date', None)
+
+    if query_date:
+        try:
+            q_date = datetime.strptime(query_date, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
+    else:
+        q_date = db.query(func.max(StockDaily.date)).scalar()
+
+    if q_date is None:
+        db.close()
+        return _get_stocks_fallback(page, per_page)
+
+    query = db.query(StockDaily).filter(StockDaily.date == q_date)
+    total = query.count()
+    dailies = query.offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for d in dailies:
+        stock = db.query(Stock).filter(Stock.code == d.code).first()
+        result.append(_build_daily_result(d, stock))
+
+    db.close()
+    return jsonify({
+        'data': result,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'price_date': q_date.strftime('%Y-%m-%d'),
     })
 
 
@@ -168,10 +211,12 @@ def get_top_losers():
 
 @api.route('/crawler/update_list', methods=['POST'])
 def update_stock_list():
+    start_time = time.time()
     crawler = StockListCrawler()
     df = crawler.fetch_stock_list_df()
+    elapsed = round(time.time() - start_time, 1)
     if df.empty:
-        return jsonify({'message': '获取股票列表失败'}), 500
+        return jsonify({'message': '获取股票列表失败', 'success_count': 0, 'fail_count': 0, 'elapsed': elapsed}), 500
 
     success_count, fail_count = save_stock_list(df)
     record_crawl_status(
@@ -180,17 +225,42 @@ def update_stock_list():
         success_count=success_count,
         fail_count=fail_count,
     )
-    return jsonify({'message': f'成功更新 {success_count} 只股票'})
+    return jsonify({
+        'message': f'成功更新 {success_count} 只股票',
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'elapsed': elapsed,
+    })
 
 
 @api.route('/crawler/update_realtime', methods=['POST'])
 def update_realtime():
+    force = request.json.get('force', True) if request.is_json else True
+    quote_date_str = request.json.get('date', None) if request.is_json else None
+
+    if not force:
+        today = date.today()
+        if has_today_success_record('realtime', today):
+            return jsonify({
+                'message': '今日已有成功爬取记录，如需强制更新请勾选强制刷新',
+                'success_count': 0,
+                'fail_count': 0,
+                'elapsed': 0,
+                'skipped': True,
+            })
+
+    quote_date = None
+    if quote_date_str:
+        quote_date = datetime.strptime(quote_date_str, '%Y-%m-%d').date()
+
+    start_time = time.time()
     crawler = StockRealtimeCrawler()
     df = crawler.fetch_realtime_df()
+    elapsed = round(time.time() - start_time, 1)
     if df.empty:
-        return jsonify({'message': '获取实时行情失败'}), 500
+        return jsonify({'message': '获取实时行情失败', 'success_count': 0, 'fail_count': 0, 'elapsed': elapsed}), 500
 
-    success_count, fail_count = save_realtime_quotes(df)
+    success_count, fail_count = save_realtime_quotes(df, quote_date=quote_date)
     status = "success" if fail_count == 0 else "partial"
     record_crawl_status(
         crawl_type="realtime",
@@ -198,7 +268,13 @@ def update_realtime():
         success_count=success_count,
         fail_count=fail_count,
     )
-    return jsonify({'message': f'成功更新 {success_count} 只股票实时数据'})
+    return jsonify({
+        'message': f'成功更新 {success_count} 只股票实时数据',
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'elapsed': elapsed,
+        'price_date': quote_date.strftime('%Y-%m-%d') if quote_date else date.today().strftime('%Y-%m-%d'),
+    })
 
 
 @api.route('/crawler/fetch_daily/<code>', methods=['POST'])
