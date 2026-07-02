@@ -72,13 +72,76 @@
       <div class="crawler-item">
         <div class="crawler-info">
           <h3>获取个股历史数据</h3>
-          <p>获取指定股票的日线历史数据</p>
+          <p>获取指定股票的日线历史数据（腾讯数据源）</p>
         </div>
         <div class="fetch-daily">
           <el-input v-model="dailyCode" placeholder="输入股票代码" class="daily-input" />
           <el-button type="primary" :loading="loading.daily" @click="fetchDaily">
             获取数据
           </el-button>
+        </div>
+      </div>
+
+      <!-- 批量日线数据 -->
+      <div class="crawler-item">
+        <div class="crawler-info">
+          <h3>批量获取日线数据</h3>
+          <p>批量获取所有股票的日线历史数据（腾讯数据源）</p>
+        </div>
+        <el-button type="success" :loading="loading.dailyBatch" :disabled="dailyBatchProgress.running" @click="fetchDailyBatch">
+          {{ loading.dailyBatch || dailyBatchProgress.running ? '爬取中...' : '批量爬取' }}
+        </el-button>
+      </div>
+
+      <div class="batch-options">
+        <div class="option-row">
+          <span class="option-label">开始日期：</span>
+          <el-date-picker
+            v-model="batchStartDate"
+            type="date"
+            placeholder="开始日期"
+            format="YYYY-MM-DD"
+            value-format="YYYYMMDD"
+            size="small"
+            :disabled="dailyBatchProgress.running"
+          />
+        </div>
+        <div class="option-row">
+          <span class="option-label">结束日期：</span>
+          <el-date-picker
+            v-model="batchEndDate"
+            type="date"
+            placeholder="结束日期"
+            format="YYYY-MM-DD"
+            value-format="YYYYMMDD"
+            size="small"
+            :disabled="dailyBatchProgress.running"
+          />
+        </div>
+      </div>
+
+      <div v-if="dailyBatchProgress.running || dailyBatchProgress.total > 0" class="batch-progress">
+        <div class="progress-header">
+          <span class="progress-text">
+            进度：{{ dailyBatchProgress.current }} / {{ dailyBatchProgress.total }}
+            <span v-if="dailyBatchProgress.current_code">（当前：{{ dailyBatchProgress.current_code }}）</span>
+          </span>
+          <span class="progress-percent">
+            {{ dailyBatchProgress.total > 0 ? Math.round(dailyBatchProgress.current / dailyBatchProgress.total * 100) : 0 }}%
+          </span>
+        </div>
+        <el-progress
+          :percentage="dailyBatchProgress.total > 0 ? Math.round(dailyBatchProgress.current / dailyBatchProgress.total * 100) : 0"
+          :status="!dailyBatchProgress.running && dailyBatchProgress.total > 0 && dailyBatchProgress.failed === 0 ? 'success' : ''"
+        />
+        <div class="batch-stats">
+          <span>成功：{{ dailyBatchProgress.success }} 只</span>
+          <span>失败：{{ dailyBatchProgress.failed }} 只</span>
+          <span v-if="dailyBatchProgress.added !== undefined">新增：{{ dailyBatchProgress.added }} 条</span>
+          <span v-if="dailyBatchProgress.updated !== undefined">更新：{{ dailyBatchProgress.updated }} 条</span>
+        </div>
+        <div v-if="dailyBatchProgress.error" class="batch-error">
+          错误：{{ dailyBatchProgress.error }}
         </div>
       </div>
     </el-card>
@@ -99,19 +162,37 @@
 </template>
 
 <script setup>
-import { ref, reactive, onUnmounted } from 'vue'
+import { ref, reactive, onUnmounted, onMounted } from 'vue'
 import { stockAPI } from '../api/stock'
 
 const loading = reactive({
   list: false,
   realtime: false,
-  daily: false
+  daily: false,
+  dailyBatch: false
 })
 
 const listProgress = ref(0)
 const realtimeProgress = ref(0)
 let listTimer = null
 let realtimeTimer = null
+let dailyBatchTimer = null
+
+const dailyBatchProgress = reactive({
+  running: false,
+  current: 0,
+  total: 0,
+  current_code: '',
+  success: 0,
+  failed: 0,
+  added: 0,
+  updated: 0,
+  start_time: null,
+  error: null
+})
+
+const batchStartDate = ref('20250101')
+const batchEndDate = ref(new Date().toISOString().slice(0, 10).replace(/-/g, ''))
 
 const startListProgress = () => {
   if (listTimer) clearInterval(listTimer)
@@ -158,6 +239,38 @@ const finishRealtimeProgress = () => {
 onUnmounted(() => {
   if (listTimer) clearInterval(listTimer)
   if (realtimeTimer) clearInterval(realtimeTimer)
+  if (dailyBatchTimer) clearInterval(dailyBatchTimer)
+})
+
+const pollDailyProgress = async () => {
+  try {
+    const response = await stockAPI.getDailyProgress()
+    const data = response.data
+    dailyBatchProgress.running = data.running
+    dailyBatchProgress.current = data.current
+    dailyBatchProgress.total = data.total
+    dailyBatchProgress.current_code = data.current_code
+    dailyBatchProgress.success = data.success
+    dailyBatchProgress.failed = data.failed
+    dailyBatchProgress.added = data.added
+    dailyBatchProgress.updated = data.updated
+    dailyBatchProgress.start_time = data.start_time
+    dailyBatchProgress.error = data.error
+
+    if (!data.running && data.total > 0) {
+      if (dailyBatchTimer) {
+        clearInterval(dailyBatchTimer)
+        dailyBatchTimer = null
+      }
+      addLog(`批量日线爬取完成：成功 ${data.success} 只，失败 ${data.failed} 只`)
+    }
+  } catch (e) {
+    console.error('获取进度失败', e)
+  }
+}
+
+onMounted(() => {
+  pollDailyProgress()
 })
 
 const dailyCode = ref('')
@@ -243,6 +356,25 @@ const fetchDaily = async () => {
     addLog(`获取历史数据失败: ${error.message}`)
   } finally {
     loading.daily = false
+  }
+}
+
+const fetchDailyBatch = async () => {
+  loading.dailyBatch = true
+  try {
+    const response = await stockAPI.fetchDailyBatch({
+      start_date: batchStartDate.value,
+      end_date: batchEndDate.value,
+      adjust: 'qfq'
+    })
+    addLog(response.data.message)
+
+    if (!dailyBatchTimer) {
+      dailyBatchTimer = setInterval(pollDailyProgress, 2000)
+    }
+  } catch (error) {
+    addLog(`批量爬取失败: ${error.message}`)
+    loading.dailyBatch = false
   }
 }
 </script>
@@ -368,5 +500,65 @@ const fetchDaily = async () => {
   text-align: center;
   color: #999;
   padding: 40px;
+}
+
+.batch-options {
+  display: flex;
+  gap: 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.option-label {
+  font-size: 13px;
+  color: #606266;
+}
+
+.batch-progress {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: #fafafa;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.progress-text {
+  font-size: 13px;
+  color: #606266;
+}
+
+.progress-percent {
+  font-size: 14px;
+  font-weight: 500;
+  color: #409eff;
+}
+
+.batch-stats {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.batch-error {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #fef0f0;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 12px;
 }
 </style>

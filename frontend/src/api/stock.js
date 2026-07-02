@@ -35,6 +35,12 @@ export const stockAPI = {
   },
   fetchDaily(code) {
     return api.post(`/crawler/fetch_daily/${code}`)
+  },
+  fetchDailyBatch(params = {}) {
+    return api.post('/crawler/fetch_daily_batch', params)
+  },
+  getDailyProgress() {
+    return api.get('/crawler/progress/daily')
   }
 }
 

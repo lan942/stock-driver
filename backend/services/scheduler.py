@@ -1,6 +1,6 @@
 """定时任务调度器：自动执行股票列表更新和实时行情爬取"""
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -9,13 +9,17 @@ from apscheduler.jobstores.base import JobLookupError
 
 from backend.services.crawler.stock_list import StockListCrawler
 from backend.services.crawler.stock_realtime import StockRealtimeCrawler
+from backend.services.crawler.stock_daily import TencentStockDailyCrawler
 from backend.services.stock_service import (
     save_stock_list,
     save_realtime_quotes,
+    save_daily_batch,
     record_crawl_status,
     has_today_success_record,
 )
 from backend.utils.trading_day import is_trading_day
+from backend.models.stock import Stock
+from backend.utils.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +35,9 @@ class CrawlScheduler:
         """配置定时任务"""
         self.scheduler.add_job(
             func=self._update_stock_list,
-            trigger=CronTrigger(hour=0, minute=30),
+            trigger=CronTrigger(hour=0, minute=30, day_of_week='mon'),
             id="stock_list_update",
-            name="股票列表更新",
+            name="股票列表更新（每周一）",
             replace_existing=True,
         )
 
@@ -45,7 +49,18 @@ class CrawlScheduler:
             replace_existing=True,
         )
 
-        logger.info("定时任务配置完成: stock_list_update (每日00:30), realtime_quotes_update (交易日15:15起每5分钟)")
+        self.scheduler.add_job(
+            func=self._update_daily_quotes,
+            trigger=CronTrigger(hour=16, minute=0),
+            id="daily_quotes_update",
+            name="日线数据更新（腾讯）",
+            replace_existing=True,
+        )
+
+        logger.info("定时任务配置完成: "
+                    "stock_list_update (每周一00:30), "
+                    "realtime_quotes_update (交易日15:15起每5分钟), "
+                    "daily_quotes_update (交易日16:00)")
 
     def _update_stock_list(self):
         """执行股票列表更新"""
@@ -144,6 +159,91 @@ class CrawlScheduler:
             logger.error(f"实时行情爬取失败: {e}")
             record_crawl_status(
                 crawl_type="realtime",
+                status="failed",
+                crawl_time=crawl_time,
+                success_count=0,
+                fail_count=0,
+                error_message=str(e)
+            )
+
+    def _update_daily_quotes(self):
+        """执行日线数据更新（腾讯源，每日收盘后增量更新）"""
+        today = date.today()
+        crawl_time = datetime.now()
+
+        if has_today_success_record("daily", today):
+            logger.info(f"今日({today})日线数据已更新成功，跳过")
+            return
+
+        if not is_trading_day(today):
+            logger.info(f"今日({today})非交易日，标记日线为已完成（成功数0）")
+            record_crawl_status(
+                crawl_type="daily",
+                status="success",
+                crawl_time=crawl_time,
+                success_count=0,
+                fail_count=0,
+                error_message="非交易日，无需爬取"
+            )
+            return
+
+        logger.info("开始执行日线数据更新（腾讯源）...")
+
+        try:
+            db = next(get_db())
+            stocks = db.query(Stock.code).all()
+            codes = [s[0] for s in stocks]
+            db.close()
+
+            if not codes:
+                record_crawl_status(
+                    crawl_type="daily",
+                    status="failed",
+                    crawl_time=crawl_time,
+                    success_count=0,
+                    fail_count=0,
+                    error_message="没有可爬取的股票"
+                )
+                return
+
+            date_str = today.strftime('%Y%m%d')
+            crawler = TencentStockDailyCrawler()
+            success, failed, df_list = crawler.fetch_batch(
+                codes=codes,
+                start_date=date_str,
+                end_date=date_str,
+                adjust="qfq",
+            )
+
+            if not df_list:
+                record_crawl_status(
+                    crawl_type="daily",
+                    status="failed",
+                    crawl_time=crawl_time,
+                    success_count=0,
+                    fail_count=len(codes),
+                    error_message="所有股票爬取失败"
+                )
+                return
+
+            success_stocks, fail_stocks, added, updated = save_daily_batch(df_list)
+
+            status = "success" if failed == 0 else "partial"
+            record_crawl_status(
+                crawl_type="daily",
+                status=status,
+                crawl_time=crawl_time,
+                success_count=success,
+                fail_count=failed,
+                error_message=f"新增{added}条，更新{updated}条"
+            )
+            logger.info(f"日线数据更新完成，成功 {success}，失败 {failed}，"
+                        f"新增 {added} 条，更新 {updated} 条")
+
+        except Exception as e:
+            logger.error(f"日线数据更新失败: {e}")
+            record_crawl_status(
+                crawl_type="daily",
                 status="failed",
                 crawl_time=crawl_time,
                 success_count=0,

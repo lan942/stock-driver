@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional, Union
 
+import pandas as pd
+
 logger = logging.getLogger(__name__)
 
 Number = Union[int, float, str, None]
@@ -233,6 +235,73 @@ def normalize_stock_realtime_data(
     )
 
     return result
+
+
+def normalize_tencent_daily_row(row: dict[str, Any], code: str) -> dict[str, Any]:
+    """
+    归一化腾讯日线数据（stock_zh_a_daily 接口返回的英文字段）
+
+    Args:
+        row: 腾讯接口返回的单行数据字典（英文字段名）
+        code: 股票代码（不含sh/sz前缀）
+
+    Returns:
+        归一化后的字典，包含 code/date/open/high/low/close/volume/turnover/
+        turnover_rate/change_percent/pe/pb/market_cap
+    """
+    result = {
+        "code": normalize_stock_code(code),
+        "date": row.get("date"),
+        "open": normalize_price(row.get("open"), "yuan"),
+        "high": normalize_price(row.get("high"), "yuan"),
+        "low": normalize_price(row.get("low"), "yuan"),
+        "close": normalize_price(row.get("close"), "yuan"),
+        "volume": normalize_volume(row.get("volume"), "shares"),
+        "turnover": normalize_turnover(row.get("amount"), "yuan"),
+        "turnover_rate": normalize_turnover_rate(row.get("turnover"), "decimal"),
+        "change_percent": None,
+        "pe": None,
+        "pb": None,
+        "market_cap": None,
+    }
+    return result
+
+
+def normalize_tencent_daily_df(df: pd.DataFrame, code: str) -> pd.DataFrame:
+    """
+    归一化腾讯日线DataFrame，增加涨跌幅计算
+
+    Args:
+        df: 腾讯接口返回的DataFrame
+        code: 股票代码（不含sh/sz前缀）
+
+    Returns:
+        归一化后的DataFrame
+    """
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "code", "date", "open", "high", "low", "close",
+            "volume", "turnover", "turnover_rate", "change_percent",
+            "pe", "pb", "market_cap"
+        ])
+
+    df_sorted = df.sort_values("date").reset_index(drop=True)
+    result_rows: list[dict[str, Any]] = []
+
+    prev_close: Optional[float] = None
+    for _, row in df_sorted.iterrows():
+        normalized = normalize_tencent_daily_row(row.to_dict(), code)
+
+        if prev_close is not None and normalized["close"] is not None and prev_close != 0:
+            normalized["change_percent"] = round(
+                (normalized["close"] - prev_close) / prev_close * 100, 4
+            )
+
+        result_rows.append(normalized)
+        if normalized["close"] is not None:
+            prev_close = normalized["close"]
+
+    return pd.DataFrame(result_rows)
 
 
 def normalize_stock_list_row(row: dict[str, Any]) -> dict[str, Any]:

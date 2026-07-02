@@ -6,13 +6,14 @@
         <el-date-picker
           v-model="queryDate"
           type="date"
-          placeholder="选择日期"
+          placeholder="选择日期（留空=全部日期）"
           format="YYYY-MM-DD"
           value-format="YYYY-MM-DD"
+          clearable
           @change="onDateChange"
           size="default"
         />
-        <el-button v-if="queryDate" size="small" @click="clearDate">显示最新</el-button>
+        <el-button v-if="!queryDate" size="small" @click="useLatestDate">最新日期</el-button>
       </div>
       <el-input
         v-model="searchForm.name"
@@ -32,6 +33,9 @@
 
     <div v-if="priceDate" class="current-date-info">
       当前显示：{{ priceDate }} 的行情数据
+    </div>
+    <div v-else-if="hasSearch" class="current-date-info warn">
+      当前显示：全部日期的搜索结果（共 {{ pagination.total }} 条），最新数据日期：{{ latestDate }}
     </div>
 
     <el-table :data="stocks" border style="width: 100%" @row-click="goToDetail">
@@ -90,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { stockAPI } from '../api/stock'
 import { useRouter } from 'vue-router'
 
@@ -98,6 +102,7 @@ const router = useRouter()
 const stocks = ref([])
 const queryDate = ref('')
 const priceDate = ref('')
+const latestDate = ref('')
 const searchForm = reactive({
   name: '',
   code: ''
@@ -107,6 +112,8 @@ const pagination = reactive({
   per_page: 20,
   total: 0
 })
+
+const hasSearch = computed(() => !!searchForm.name || !!searchForm.code)
 
 const loadStocks = async () => {
   try {
@@ -123,6 +130,11 @@ const loadStocks = async () => {
     pagination.total = response.data.total
     if (response.data.price_date) {
       priceDate.value = response.data.price_date
+    } else {
+      priceDate.value = ''
+    }
+    if (response.data.latest_date) {
+      latestDate.value = response.data.latest_date
     }
   } catch (error) {
     console.error('加载股票列表失败:', error)
@@ -134,8 +146,8 @@ const onDateChange = () => {
   loadStocks()
 }
 
-const clearDate = () => {
-  queryDate.value = ''
+const useLatestDate = () => {
+  queryDate.value = latestDate.value || ''
   pagination.page = 1
   loadStocks()
 }
@@ -143,6 +155,7 @@ const clearDate = () => {
 const resetSearch = () => {
   searchForm.name = ''
   searchForm.code = ''
+  queryDate.value = latestDate.value || ''
   pagination.page = 1
   loadStocks()
 }
@@ -151,8 +164,12 @@ const goToDetail = (row) => {
   router.push(`/stock/${row.code}`)
 }
 
-onMounted(() => {
-  loadStocks()
+onMounted(async () => {
+  await loadStocks()
+  if (!queryDate.value && latestDate.value) {
+    queryDate.value = latestDate.value
+    await loadStocks()
+  }
 })
 </script>
 
@@ -189,6 +206,11 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 13px;
   color: #409eff;
+}
+
+.current-date-info.warn {
+  background: #fdf6ec;
+  color: #e6a23c;
 }
 
 .search-input {

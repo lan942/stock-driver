@@ -17,6 +17,8 @@ from backend.services.crawler.normalizer import (
     normalize_stock_code,
     normalize_stock_list_row,
     normalize_stock_realtime_data,
+    normalize_tencent_daily_row,
+    normalize_tencent_daily_df,
     normalize_turnover,
     normalize_turnover_rate,
     normalize_volume,
@@ -28,6 +30,10 @@ from backend.services.crawler.stock_list import (
 from backend.services.crawler.stock_realtime import (
     StockRealtimeCrawler,
     DEFAULT_REALTIME_SOURCES,
+)
+from backend.services.crawler.stock_daily import (
+    TencentStockDailyCrawler,
+    DEFAULT_DAILY_SOURCES,
 )
 
 __all__ = [
@@ -48,8 +54,12 @@ __all__ = [
     "detect_unit_from_value",
     "normalize_stock_list_row",
     "normalize_stock_realtime_data",
+    "normalize_tencent_daily_row",
+    "normalize_tencent_daily_df",
     "StockListCrawler",
     "StockRealtimeCrawler",
+    "TencentStockDailyCrawler",
     "STOCK_LIST_SOURCES",
     "DEFAULT_REALTIME_SOURCES",
+    "DEFAULT_DAILY_SOURCES",
 ]

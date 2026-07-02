@@ -129,6 +129,95 @@ def record_crawl_status(
         logger.error(f"记录爬取状态失败: {e}")
 
 
+def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
+    """
+    批量保存多只股票的日线数据，返回(成功数, 失败数, 新增数, 更新数)
+
+    Args:
+        df_list: 多个DataFrame的列表，每个DataFrame对应一只股票的日线数据
+
+    Returns:
+        (成功股票数, 失败股票数, 新增记录数, 更新记录数)
+    """
+    if not df_list:
+        return 0, 0, 0, 0
+
+    db = next(get_db())
+    success_stocks = 0
+    fail_stocks = 0
+    added_count = 0
+    updated_count = 0
+
+    for df in df_list:
+        if df.empty:
+            fail_stocks += 1
+            continue
+
+        try:
+            code = str(df.iloc[0]['code'])
+            if not db.query(Stock.code).filter(Stock.code == code).first():
+                fail_stocks += 1
+                continue
+
+            stock_added = 0
+            stock_updated = 0
+
+            for _, row in df.iterrows():
+                date_val = row['date']
+                existing = db.query(StockDaily).filter(
+                    StockDaily.code == code, StockDaily.date == date_val
+                ).first()
+
+                if existing:
+                    existing.open = row.get('open')
+                    existing.high = row.get('high')
+                    existing.low = row.get('low')
+                    existing.close = row.get('close')
+                    existing.volume = row.get('volume')
+                    existing.turnover = row.get('turnover')
+                    existing.turnover_rate = row.get('turnover_rate')
+                    existing.change_percent = row.get('change_percent')
+                    if row.get('pe') is not None:
+                        existing.pe = row.get('pe')
+                    if row.get('pb') is not None:
+                        existing.pb = row.get('pb')
+                    if row.get('market_cap') is not None:
+                        existing.market_cap = row.get('market_cap')
+                    stock_updated += 1
+                else:
+                    daily = StockDaily(
+                        code=code,
+                        date=date_val,
+                        open=row.get('open'),
+                        high=row.get('high'),
+                        low=row.get('low'),
+                        close=row.get('close'),
+                        volume=row.get('volume'),
+                        turnover=row.get('turnover'),
+                        turnover_rate=row.get('turnover_rate'),
+                        change_percent=row.get('change_percent'),
+                        pe=row.get('pe'),
+                        pb=row.get('pb'),
+                        market_cap=row.get('market_cap'),
+                    )
+                    db.add(daily)
+                    stock_added += 1
+
+            success_stocks += 1
+            added_count += stock_added
+            updated_count += stock_updated
+
+        except Exception as e:
+            logger.warning(f"保存股票日线失败: {e}")
+            fail_stocks += 1
+
+    db.commit()
+    db.close()
+    logger.info(f"批量日线保存完成: 成功{success_stocks}只, 失败{fail_stocks}只, "
+                f"新增{added_count}条, 更新{updated_count}条")
+    return success_stocks, fail_stocks, added_count, updated_count
+
+
 def has_today_success_record(crawl_type: str, today: date) -> bool:
     """检查当天是否已有成功的爬取记录"""
     try:

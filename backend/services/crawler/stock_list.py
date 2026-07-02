@@ -13,9 +13,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCES = [
     {
-        "name": "akshare_em",
+        "name": "akshare_sina",
         "type": "akshare",
         "function": "stock_info_a_code_name",
+        "max_retries": 3,
+        "base_wait": 1.0,
+        "max_wait": 60.0,
+    },
+    {
+        "name": "akshare_em_spot",
+        "type": "akshare_spot",
+        "function": "stock_zh_a_spot_em",
         "max_retries": 3,
         "base_wait": 1.0,
         "max_wait": 60.0,
@@ -63,7 +71,37 @@ class StockListCrawler(CrawlerBase):
 
             return self._normalize_dataframe(df)
 
+        if source_type == "akshare_spot":
+            func_name = source.get("function", "stock_zh_a_spot_em")
+            try:
+                df = getattr(ak, func_name)()
+            except AttributeError as e:
+                raise CrawlerError(f"akshare function not found: {func_name}") from e
+            except Exception as e:
+                if self._is_rate_limit_error(e):
+                    raise
+                raise CrawlerError(f"Failed to fetch stock list from spot: {e}") from e
+
+            if df is None or df.empty:
+                raise CrawlerError("Empty stock list data from spot")
+
+            return self._normalize_spot_dataframe(df)
+
         raise CrawlerError(f"Unsupported source type: {source_type}")
+
+    def _normalize_spot_dataframe(self, df: pd.DataFrame) -> list[dict[str, Any]]:
+        """从东财实时行情快照中提取股票代码和名称"""
+        result: list[dict[str, Any]] = []
+        for _, row in df.iterrows():
+            try:
+                code = str(row.get('代码', row.get('code', ''))).strip()
+                name = str(row.get('名称', row.get('name', ''))).strip()
+                if code and name:
+                    result.append({"code": code, "name": name})
+            except Exception as e:
+                logger.warning("Failed to normalize spot stock list row: %s", e)
+                continue
+        return result
 
     def _is_rate_limit_error(self, exc: Exception) -> bool:
         msg = str(exc).lower()

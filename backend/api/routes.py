@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 import time
+import threading
 from datetime import date, datetime
 from backend.services.analysis import StockAnalysis
 from backend.utils.db import get_db
@@ -7,15 +8,31 @@ from backend.models.stock import Stock, StockDaily
 from backend.models.crawl_status import CrawlStatus
 from backend.services.crawler.stock_list import StockListCrawler
 from backend.services.crawler.stock_realtime import StockRealtimeCrawler
+from backend.services.crawler.stock_daily import TencentStockDailyCrawler
 from backend.services.stock_service import (
     save_stock_list,
     save_realtime_quotes,
+    save_daily_batch,
     record_crawl_status,
     has_today_success_record,
 )
 from backend.services.scheduler import get_scheduler
 
 api = Blueprint('api', __name__)
+
+_daily_crawl_progress = {
+    'running': False,
+    'current': 0,
+    'total': 0,
+    'current_code': '',
+    'success': 0,
+    'failed': 0,
+    'added': 0,
+    'updated': 0,
+    'start_time': None,
+    'error': None,
+}
+_daily_crawl_lock = threading.Lock()
 
 
 def _build_daily_result(d, stock):
@@ -38,11 +55,16 @@ def _build_daily_result(d, stock):
     }
 
 
-def _get_stocks_fallback(page, per_page):
+def _get_stocks_fallback(page, per_page, code=None, name=None):
     """回退：StockDaily 表无数据时查 Stock 表"""
     db = next(get_db())
-    stocks = db.query(Stock).order_by(Stock.code).offset((page - 1) * per_page).limit(per_page).all()
-    total = db.query(Stock).count()
+    query = db.query(Stock)
+    if code:
+        query = query.filter(Stock.code.like(f'%{code}%'))
+    if name:
+        query = query.filter(Stock.name.like(f'%{name}%'))
+    total = query.count()
+    stocks = query.order_by(Stock.code).offset((page - 1) * per_page).limit(per_page).all()
     result = [{
         'id': s.id,
         'code': s.code,
@@ -80,36 +102,61 @@ def get_stocks():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     query_date = request.args.get('date', None)
+    search_code = request.args.get('code', None)
+    search_name = request.args.get('name', None)
 
-    if query_date:
-        try:
-            q_date = datetime.strptime(query_date, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
-    else:
-        q_date = db.query(func.max(StockDaily.date)).scalar()
+    max_date = db.query(func.max(StockDaily.date)).scalar()
 
-    if q_date is None:
+    if max_date is None:
         db.close()
-        return _get_stocks_fallback(page, per_page)
+        return _get_stocks_fallback(page, per_page, search_code, search_name)
 
-    query = db.query(StockDaily).filter(StockDaily.date == q_date)
+    has_search = bool(search_code or search_name)
+    has_date_filter = bool(query_date and query_date.strip())
+
+    q_date = None
+    if has_date_filter:
+        try:
+            q_date = datetime.strptime(query_date.strip(), '%Y-%m-%d').date()
+        except ValueError:
+            db.close()
+            return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
+    elif not has_search:
+        q_date = max_date
+
+    query = db.query(StockDaily)
+    if q_date is not None:
+        query = query.filter(StockDaily.date == q_date)
+    if search_code:
+        query = query.filter(StockDaily.code.like(f'%{search_code}%'))
+    if search_name:
+        query = query.join(Stock, StockDaily.code == Stock.code).filter(Stock.name.like(f'%{search_name}%'))
+
     total = query.count()
-    dailies = query.offset((page - 1) * per_page).limit(per_page).all()
 
+    if q_date is not None:
+        dailies = query.order_by(StockDaily.code).offset((page - 1) * per_page).limit(per_page).all()
+    else:
+        dailies = query.order_by(StockDaily.date.desc(), StockDaily.code).offset((page - 1) * per_page).limit(per_page).all()
+
+    stock_cache = {}
     result = []
     for d in dailies:
-        stock = db.query(Stock).filter(Stock.code == d.code).first()
-        result.append(_build_daily_result(d, stock))
+        if d.code not in stock_cache:
+            stock_cache[d.code] = db.query(Stock).filter(Stock.code == d.code).first()
+        result.append(_build_daily_result(d, stock_cache[d.code]))
 
     db.close()
-    return jsonify({
+    resp = {
         'data': result,
         'total': total,
         'page': page,
         'per_page': per_page,
-        'price_date': q_date.strftime('%Y-%m-%d'),
-    })
+    }
+    if q_date is not None:
+        resp['price_date'] = q_date.strftime('%Y-%m-%d')
+    resp['latest_date'] = max_date.strftime('%Y-%m-%d') if max_date else None
+    return jsonify(resp)
 
 
 @api.route('/stocks/<code>', methods=['GET'])
@@ -279,35 +326,135 @@ def update_realtime():
 
 @api.route('/crawler/fetch_daily/<code>', methods=['POST'])
 def fetch_daily(code):
-    import akshare as ak
-    from datetime import datetime
-    db = next(get_db())
+    """获取单只股票历史日线数据（腾讯源）"""
+    data = request.get_json(silent=True) or {}
+    start_date = data.get('start_date', '20250101')
+    end_date = data.get('end_date', datetime.now().strftime('%Y%m%d'))
+    adjust = data.get('adjust', 'qfq')
+
     try:
-        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date="20250601",
-                                 end_date=datetime.now().strftime('%Y%m%d'), adjust="qfq")
+        crawler = TencentStockDailyCrawler()
+        df = crawler.fetch_single(code, start_date, end_date, adjust)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
     if df.empty:
         return jsonify({'message': '没有获取到数据'}), 404
-    count = 0
-    for _, row in df.iterrows():
-        date_str = str(row['日期'])
-        date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        existing = db.query(StockDaily).filter(
-            StockDaily.code == code, StockDaily.date == date
-        ).first()
-        if not existing:
-            daily = StockDaily(
-                code=code, date=date,
-                open=row.get('开盘', None), high=row.get('最高', None),
-                low=row.get('最低', None), close=row.get('收盘', None),
-                volume=row.get('成交量', None), turnover=row.get('成交额', None),
-                change_percent=row.get('涨跌幅', None)
+
+    success_stocks, fail_stocks, added, updated = save_daily_batch([df])
+    return jsonify({
+        'message': f'成功获取 {len(df)} 条日线数据',
+        'count': len(df),
+        'added': added,
+        'updated': updated,
+        'code': code,
+    })
+
+
+@api.route('/crawler/fetch_daily_batch', methods=['POST'])
+def fetch_daily_batch():
+    """批量获取股票日线数据（腾讯源），异步执行，通过 /crawler/progress/daily 查询进度"""
+    global _daily_crawl_progress
+
+    with _daily_crawl_lock:
+        if _daily_crawl_progress['running']:
+            return jsonify({'error': '已有批量爬取任务正在进行中'}), 400
+
+    data = request.get_json(silent=True) or {}
+    start_date = data.get('start_date', '20250101')
+    end_date = data.get('end_date', datetime.now().strftime('%Y%m%d'))
+    adjust = data.get('adjust', 'qfq')
+    codes = data.get('codes', [])
+
+    if not codes:
+        db = next(get_db())
+        stocks = db.query(Stock.code).all()
+        codes = [s[0] for s in stocks]
+        db.close()
+
+    if not codes:
+        return jsonify({'error': '没有可爬取的股票代码'}), 400
+
+    def _progress_callback(current, total, current_code):
+        with _daily_crawl_lock:
+            _daily_crawl_progress['current'] = current
+            _daily_crawl_progress['current_code'] = current_code
+
+    def _batch_worker():
+        global _daily_crawl_progress
+        try:
+            crawler = TencentStockDailyCrawler()
+            success, failed, df_list = crawler.fetch_batch(
+                codes=codes,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust,
+                progress_callback=_progress_callback,
             )
-            db.add(daily)
-            count += 1
-    db.commit()
-    return jsonify({'message': f'成功获取 {count} 条日线数据'})
+            success_stocks, fail_stocks, added, updated = save_daily_batch(df_list)
+
+            crawl_time = datetime.now()
+            status = 'success' if failed == 0 else 'partial'
+            total_records = sum(len(df) for df in df_list)
+            record_crawl_status(
+                crawl_type='daily',
+                status=status,
+                crawl_time=crawl_time,
+                success_count=success,
+                fail_count=failed,
+                error_message=f'新增{added}条，更新{updated}条' if failed == 0 else f'{failed}只股票失败',
+            )
+
+            with _daily_crawl_lock:
+                _daily_crawl_progress['success'] = success
+                _daily_crawl_progress['failed'] = failed
+                _daily_crawl_progress['added'] = added
+                _daily_crawl_progress['updated'] = updated
+                _daily_crawl_progress['running'] = False
+        except Exception as e:
+            with _daily_crawl_lock:
+                _daily_crawl_progress['running'] = False
+                _daily_crawl_progress['error'] = str(e)
+            record_crawl_status(
+                crawl_type='daily',
+                status='failed',
+                crawl_time=datetime.now(),
+                success_count=0,
+                fail_count=len(codes),
+                error_message=str(e),
+            )
+
+    with _daily_crawl_lock:
+        _daily_crawl_progress = {
+            'running': True,
+            'current': 0,
+            'total': len(codes),
+            'current_code': '',
+            'success': 0,
+            'failed': 0,
+            'added': 0,
+            'updated': 0,
+            'start_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'error': None,
+        }
+
+    thread = threading.Thread(target=_batch_worker, daemon=True)
+    thread.start()
+
+    return jsonify({
+        'message': f'批量日线爬取已启动，共 {len(codes)} 只股票',
+        'total': len(codes),
+        'start_date': start_date,
+        'end_date': end_date,
+    })
+
+
+@api.route('/crawler/progress/daily', methods=['GET'])
+def get_daily_progress():
+    """获取日线批量爬取进度"""
+    with _daily_crawl_lock:
+        progress = dict(_daily_crawl_progress)
+    return jsonify(progress)
 
 
 @api.route('/crawl_status', methods=['GET'])
