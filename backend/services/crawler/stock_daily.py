@@ -150,7 +150,7 @@ class TencentStockDailyCrawler(CrawlerBase):
         start_date: str,
         end_date: str,
         adjust: str = "qfq",
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        progress_callback: Optional[Callable[[int, int, str, int, int], None]] = None,
         max_workers: int = 5,
     ) -> tuple[int, int, list[pd.DataFrame]]:
         """
@@ -161,7 +161,7 @@ class TencentStockDailyCrawler(CrawlerBase):
             start_date: 开始日期，格式 YYYYMMDD
             end_date: 结束日期，格式 YYYYMMDD
             adjust: 复权类型
-            progress_callback: 进度回调函数 (当前序号, 总数, 当前股票代码)
+            progress_callback: 进度回调函数 (当前序号, 总数, 当前股票代码, 成功数, 失败数)
             max_workers: 最大并发数，默认5
 
         Returns:
@@ -175,34 +175,53 @@ class TencentStockDailyCrawler(CrawlerBase):
         lock = threading.Lock()
 
         def _fetch_one(code: str) -> tuple[str, Optional[pd.DataFrame], Optional[Exception]]:
-            nonlocal completed
             try:
                 df = self.fetch_single(code, start_date, end_date, adjust)
+                logger.info("Fetched daily for %s: %d rows", code, len(df) if df is not None else 0)
                 return (code, df, None)
+            except CrawlerError as e:
+                logger.warning("Fetch daily failed for %s: %s", code, e)
+                return (code, None, e)
             except Exception as e:
+                logger.error("Unexpected error for %s: %s", code, e)
                 return (code, None, e)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_fetch_one, code): code for code in codes}
 
-            for future in as_completed(futures):
-                code, df, error = future.result()
+            for idx, future in enumerate(as_completed(futures), 1):
+                code = futures[future]
+                try:
+                    _, df, error = future.result(timeout=30)
+                except TimeoutError:
+                    logger.error("Fetch timeout for %s", code)
+                    error = Exception("Timeout")
+                    df = None
+                except Exception as e:
+                    logger.error("Future error for %s: %s", code, e)
+                    error = e
+                    df = None
 
                 with lock:
-                    completed += 1
+                    completed = idx
                     if error is None:
                         success_count += 1
                         result_dfs.append(df)
                     else:
                         fail_count += 1
-                        logger.warning("Fetch daily failed for %s: %s", code, error)
 
                     if progress_callback:
                         try:
-                            progress_callback(completed, total, code)
+                            progress_callback(completed, total, code, success_count, fail_count)
                         except Exception as cb_err:
                             logger.warning("Progress callback error: %s", cb_err)
 
+                if idx % 50 == 0:
+                    logger.info("Batch progress: %d/%d (success: %d, failed: %d)", 
+                               completed, total, success_count, fail_count)
+
+        logger.info("Batch fetch complete: %d/%d (success: %d, failed: %d)", 
+                   completed, total, success_count, fail_count)
         return success_count, fail_count, result_dfs
 
     def fetch_single_raw(

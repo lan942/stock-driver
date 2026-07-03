@@ -357,10 +357,13 @@ def fetch_daily_batch():
     if not codes:
         return jsonify({'error': '没有可爬取的股票代码'}), 400
 
-    def _progress_callback(current, total, current_code):
+    def _progress_callback(current, total, current_code, success=0, failed=0):
         with _daily_crawl_lock:
             _daily_crawl_progress['current'] = current
+            _daily_crawl_progress['total'] = total
             _daily_crawl_progress['current_code'] = current_code
+            _daily_crawl_progress['success'] = success
+            _daily_crawl_progress['failed'] = failed
 
     def _batch_worker():
         global _daily_crawl_progress

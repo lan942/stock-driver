@@ -246,6 +246,7 @@ const fetchDaily = async () => {
     if (!dailyBatchTimer) {
       dailyBatchTimer = setInterval(pollDailyProgress, 2000)
     }
+    loading.dailyBatch = false
   } catch (error) {
     addLog(`爬取失败: ${error.message}`)
     loading.dailyBatch = false
