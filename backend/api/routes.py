@@ -228,15 +228,28 @@ def get_stock_chart(code):
 def get_top_gainers():
     db = next(get_db())
     limit = request.args.get('limit', 10, type=int)
-    stocks = StockAnalysis.get_top_gainers(db, limit)
+    query_date = request.args.get('date', None)
+
+    q_date = None
+    if query_date:
+        try:
+            q_date = datetime.strptime(query_date, '%Y-%m-%d').date()
+        except ValueError:
+            db.close()
+            return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
+
+    rows, used_date = StockAnalysis.get_top_gainers(db, limit, q_date)
+    price_date_str = used_date.strftime('%Y-%m-%d') if used_date else None
 
     result = [{
-        'code': s.code,
-        'name': s.name,
-        'price': s.price,
-        'change_percent': s.change_percent
-    } for s in stocks]
+        'code': d.code,
+        'name': name or '',
+        'price': d.close,
+        'change_percent': d.change_percent,
+        'price_date': price_date_str,
+    } for d, name in rows]
 
+    db.close()
     return jsonify(result)
 
 
@@ -244,15 +257,28 @@ def get_top_gainers():
 def get_top_losers():
     db = next(get_db())
     limit = request.args.get('limit', 10, type=int)
-    stocks = StockAnalysis.get_top_losers(db, limit)
+    query_date = request.args.get('date', None)
+
+    q_date = None
+    if query_date:
+        try:
+            q_date = datetime.strptime(query_date, '%Y-%m-%d').date()
+        except ValueError:
+            db.close()
+            return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
+
+    rows, used_date = StockAnalysis.get_top_losers(db, limit, q_date)
+    price_date_str = used_date.strftime('%Y-%m-%d') if used_date else None
 
     result = [{
-        'code': s.code,
-        'name': s.name,
-        'price': s.price,
-        'change_percent': s.change_percent
-    } for s in stocks]
+        'code': d.code,
+        'name': name or '',
+        'price': d.close,
+        'change_percent': d.change_percent,
+        'price_date': price_date_str,
+    } for d, name in rows]
 
+    db.close()
     return jsonify(result)
 
 

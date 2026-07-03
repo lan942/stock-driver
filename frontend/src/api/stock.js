@@ -18,11 +18,15 @@ export const stockAPI = {
   getStockChart(code, days = 60) {
     return api.get(`/stocks/${code}/chart`, { params: { days } })
   },
-  getTopGainers(limit = 10) {
-    return api.get('/stocks/top/gainers', { params: { limit } })
+  getTopGainers(limit = 10, date = null) {
+    const params = { limit }
+    if (date) params.date = date
+    return api.get('/stocks/top/gainers', { params })
   },
-  getTopLosers(limit = 10) {
-    return api.get('/stocks/top/losers', { params: { limit } })
+  getTopLosers(limit = 10, date = null) {
+    const params = { limit }
+    if (date) params.date = date
+    return api.get('/stocks/top/losers', { params })
   },
   updateStockList() {
     return api.post('/crawler/update_list', {}, { timeout: 180000 })
