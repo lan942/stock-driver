@@ -123,24 +123,28 @@ def get_stock(code):
     if not stock:
         return jsonify({'error': '股票不存在'}), 404
 
+    latest = db.query(StockDaily).filter(
+        StockDaily.code == code
+    ).order_by(StockDaily.date.desc()).first()
+
     return jsonify({
         'id': stock.id,
         'code': stock.code,
         'name': stock.name,
         'industry': stock.industry,
         'sector': stock.sector,
-        'price': stock.price,
-        'open': stock.open,
-        'high': stock.high,
-        'low': stock.low,
-        'price_date': stock.price_date.strftime('%Y-%m-%d') if stock.price_date else None,
-        'change_percent': stock.change_percent,
-        'volume': stock.volume,
-        'turnover': stock.turnover,
-        'turnover_rate': stock.turnover_rate,
-        'pe': stock.pe,
-        'pb': stock.pb,
-        'market_cap': stock.market_cap
+        'price': latest.close if latest else None,
+        'open': latest.open if latest else None,
+        'high': latest.high if latest else None,
+        'low': latest.low if latest else None,
+        'price_date': latest.date.strftime('%Y-%m-%d') if latest and latest.date else None,
+        'change_percent': latest.change_percent if latest else None,
+        'volume': latest.volume if latest else None,
+        'turnover': latest.turnover if latest else None,
+        'turnover_rate': latest.turnover_rate if latest else None,
+        'pe': latest.pe if latest else None,
+        'pb': latest.pb if latest else None,
+        'market_cap': latest.market_cap if latest else None,
     })
 
 

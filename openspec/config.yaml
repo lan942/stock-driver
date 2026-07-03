@@ -12,15 +12,18 @@ context: |
   # 项目结构
   Project structure:
   - backend/         # Python 后端
-    - models/        # 数据库模型 (Stock, StockDaily, StockFinancial)
-    - services/      # 业务逻辑 (crawler.py, analysis.py)
+    - models/        # 数据库模型 (Stock, StockDaily, CrawlStatus)
+    - services/      # 业务逻辑 (crawler/, analysis.py, scheduler.py, stock_service.py)
     - api/           # Flask API 路由
-    - utils/         # 工具函数 (db.py)
+    - utils/         # 工具函数 (db.py, trading_day.py, migrate_db.py)
   - frontend/        # Vue 前端
     - src/views/     # 页面组件
     - src/components/# 通用组件
     - src/api/       # API 调用封装
   - data/            # SQLite 数据库文件
+  - openspec/        # 规范文档
+  - manage.py        # CLI 管理入口
+  - tests/           # 单元测试
 
   # 代码规范
   Code conventions:

@@ -5,12 +5,13 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from backend.services.crawler.base import CrawlerBase, CrawlerError, CrawlerResult
+from backend.services.crawler.base import CrawlerBase, CrawlerError
 from backend.services.crawler.normalizer import normalize_stock_list_row
 from backend.services.crawler.rate_limiter import RateLimiter, RateLimitConfig
 
 logger = logging.getLogger(__name__)
 
+# 主源：新浪（akshare stock_info_a_code_name）；备用源：东方财富实时快照
 DEFAULT_SOURCES = [
     {
         "name": "akshare_sina",
@@ -21,33 +22,9 @@ DEFAULT_SOURCES = [
         "max_wait": 60.0,
     },
     {
-        "name": "akshare_zh_a_spot",
-        "type": "akshare_spot",
-        "function": "stock_zh_a_spot",
-        "max_retries": 3,
-        "base_wait": 1.0,
-        "max_wait": 60.0,
-    },
-    {
         "name": "akshare_em_spot",
         "type": "akshare_spot",
         "function": "stock_zh_a_spot_em",
-        "max_retries": 3,
-        "base_wait": 1.0,
-        "max_wait": 60.0,
-    },
-    {
-        "name": "akshare_sh_spot",
-        "type": "akshare_spot",
-        "function": "stock_sh_a_spot_em",
-        "max_retries": 3,
-        "base_wait": 1.0,
-        "max_wait": 60.0,
-    },
-    {
-        "name": "akshare_sz_spot",
-        "type": "akshare_spot",
-        "function": "stock_sz_a_spot_em",
         "max_retries": 3,
         "base_wait": 1.0,
         "max_wait": 60.0,
@@ -121,34 +98,21 @@ class StockListCrawler(CrawlerBase):
             try:
                 code = str(row.get('代码', row.get('code', ''))).strip()
                 name = str(row.get('名称', row.get('name', ''))).strip()
-                
+
                 code = code.lower().replace('sh', '').replace('sz', '').replace('bj', '')
-                
+
                 if not code.isdigit():
                     continue
-                
+
                 if not code.startswith(a_share_prefixes):
                     continue
-                
+
                 if code and name:
                     result.append({"code": code, "name": name})
             except Exception as e:
                 logger.warning("Failed to normalize spot stock list row: %s", e)
                 continue
         return result
-
-    def _is_rate_limit_error(self, exc: Exception) -> bool:
-        msg = str(exc).lower()
-        rate_limit_keywords = [
-            "429",
-            "rate limit",
-            "too many requests",
-            "请求过于频繁",
-            "频率限制",
-            "限流",
-            "访问太频繁",
-        ]
-        return any(keyword in msg for keyword in rate_limit_keywords)
 
     def _normalize_dataframe(self, df: pd.DataFrame) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

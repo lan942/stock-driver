@@ -7,7 +7,7 @@ from typing import Any, Optional
 import pandas as pd
 import requests
 
-from backend.services.crawler.base import CrawlerBase, CrawlerError, CrawlerResult
+from backend.services.crawler.base import CrawlerBase, CrawlerError
 from backend.services.crawler.normalizer import normalize_stock_realtime_data
 from backend.services.crawler.rate_limiter import RateLimiter, RateLimitConfig
 
@@ -228,20 +228,6 @@ class StockRealtimeCrawler(CrawlerBase):
             f"Direct HTTP fetch failed after {max_retries} retries: {last_exc}"
         )
 
-    def _is_rate_limit_error(self, exc: Exception) -> bool:
-        msg = str(exc).lower()
-        rate_limit_keywords = [
-            "429",
-            "rate limit",
-            "too many requests",
-            "请求过于频繁",
-            "频率限制",
-            "限流",
-            "访问太频繁",
-            "connection reset",
-        ]
-        return any(keyword in msg for keyword in rate_limit_keywords)
-
     def _normalize_dataframe(
         self, df: pd.DataFrame, field_units: dict[str, str]
     ) -> list[dict[str, Any]]:
@@ -267,15 +253,3 @@ class StockRealtimeCrawler(CrawlerBase):
         if not data:
             return pd.DataFrame()
         return pd.DataFrame(data)
-
-    def fetch_single_stock(self, code: str) -> Optional[dict[str, Any]]:
-        all_data = self.fetch_realtime()
-        for item in all_data:
-            if item["code"] == code:
-                return item
-        return None
-
-    def fetch_batch_stocks(self, codes: list[str]) -> list[dict[str, Any]]:
-        code_set = set(codes)
-        all_data = self.fetch_realtime()
-        return [item for item in all_data if item["code"] in code_set]

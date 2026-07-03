@@ -61,17 +61,12 @@ def save_realtime_quotes(df: pd.DataFrame, quote_date: Optional[date] = None) ->
                 StockDaily.code == code, StockDaily.date == quote_date
             ).first()
             if daily:
-                daily.close = row.get('close')
-                daily.open = row.get('open')
-                daily.high = row.get('high')
-                daily.low = row.get('low')
-                daily.change_percent = row.get('change_percent')
-                daily.volume = row.get('volume')
-                daily.turnover = row.get('turnover')
-                daily.turnover_rate = row.get('turnover_rate')
-                daily.pe = row.get('pe')
-                daily.pb = row.get('pb')
-                daily.market_cap = row.get('market_cap')
+                for field in ('close', 'open', 'high', 'low', 'change_percent',
+                              'volume', 'turnover', 'turnover_rate',
+                              'pe', 'pb', 'market_cap'):
+                    val = row.get(field)
+                    if val is not None:
+                        setattr(daily, field, val)
             else:
                 daily = StockDaily(
                     code=code,
@@ -169,20 +164,12 @@ def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
                 ).first()
 
                 if existing:
-                    existing.open = row.get('open')
-                    existing.high = row.get('high')
-                    existing.low = row.get('low')
-                    existing.close = row.get('close')
-                    existing.volume = row.get('volume')
-                    existing.turnover = row.get('turnover')
-                    existing.turnover_rate = row.get('turnover_rate')
-                    existing.change_percent = row.get('change_percent')
-                    if row.get('pe') is not None:
-                        existing.pe = row.get('pe')
-                    if row.get('pb') is not None:
-                        existing.pb = row.get('pb')
-                    if row.get('market_cap') is not None:
-                        existing.market_cap = row.get('market_cap')
+                    for field in ('open', 'high', 'low', 'close', 'volume', 'turnover',
+                                  'turnover_rate', 'change_percent',
+                                  'pe', 'pb', 'market_cap'):
+                        val = row.get(field)
+                        if val is not None:
+                            setattr(existing, field, val)
                     stock_updated += 1
                 else:
                     daily = StockDaily(

@@ -40,7 +40,7 @@ CrawlStatus模型 SHALL 包含以下字段：
 | crawl_time | DateTime | 爬取开始时间 |
 | success_count | Integer | 成功数量，默认0 |
 | fail_count | Integer | 失败数量，默认0 |
-| error_message | Text | 错误信息（仅失败时记录） |
+| error_message | Text | 错误信息或摘要信息（failed 记录错误详情；partial 可记录新增/更新条数等摘要；success 可为 NULL） |
 
 #### Scenario: CrawlStatus fields validation
 - **WHEN** 创建CrawlStatus记录

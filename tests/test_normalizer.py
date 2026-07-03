@@ -116,7 +116,7 @@ class TestNormalizeStockRealtimeData(unittest.TestCase):
             "最低": 1790.0,
             "成交量": 1000000,
             "成交额": 1850000000,
-            "换手率": 0.5,
+            "换手率": 5.25,
             "涨跌幅": 2.5,
         }
         result = normalize_stock_realtime_data(row)
@@ -128,7 +128,7 @@ class TestNormalizeStockRealtimeData(unittest.TestCase):
         self.assertEqual(result["low"], 1790.0)
         self.assertEqual(result["volume"], 1000000.0)
         self.assertEqual(result["turnover"], 1850000000.0)
-        self.assertEqual(result["turnover_rate"], 0.5)
+        self.assertEqual(result["turnover_rate"], 5.25)
         self.assertEqual(result["change_percent"], 2.5)
 
     def test_normalize_with_english_keys(self):

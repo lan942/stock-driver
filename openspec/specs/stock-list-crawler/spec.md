@@ -56,7 +56,8 @@ The crawler SHALL log errors and raise exceptions for critical failures without 
 
 #### Scenario: Empty data from all sources
 - **WHEN** 所有数据源返回空数据
-- **THEN** 爬虫 SHALL 抛出CrawlerError异常，错误信息为"所有数据源返回空数据"
+- **THEN** `CrawlerBase.fetch` SHALL 返回 `CrawlerResult(success=False)`，错误信息为 "All sources failed"
+- **AND** 调用方（如 `fetch_stock_list`）SHALL 据此抛出 `CrawlerError`
 
 ### Requirement: Rate limit handling
 

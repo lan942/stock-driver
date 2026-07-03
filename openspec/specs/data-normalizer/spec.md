@@ -1,8 +1,10 @@
 # data-normalizer Specification
 
 ## Purpose
-TBD - created by archiving change stock-crawler-base. Update Purpose after archive.
+数据归一化工具：将不同数据源（新浪、东方财富、腾讯）返回的股票数据统一转换为标准格式（价格单位为元、成交量单位为股、比率单位为百分比），供爬虫调用。
+
 ## Requirements
+
 ### Requirement: Normalize price units
 
 The normalizer SHALL convert all price values to yuan (元).
@@ -12,8 +14,12 @@ The normalizer SHALL convert all price values to yuan (元).
 - **THEN** the output SHALL be 1850.50
 
 #### Scenario: Price in wan yuan
-- **WHEN** the input price is marked as in wan yuan (e.g., 18.505)
-- **THEN** the output SHALL be 18505.0 (multiplied by 1000)
+- **WHEN** the input price is marked as in wan yuan (e.g., 18.505 万元)
+- **THEN** the output SHALL be 185050.0 (multiplied by 10000)
+
+#### Scenario: Price in yi yuan
+- **WHEN** the input price is marked as in yi yuan (e.g., 1.0 亿元)
+- **THEN** the output SHALL be 100000000.0 (multiplied by 100000000)
 
 ### Requirement: Normalize volume units
 
@@ -23,9 +29,13 @@ The normalizer SHALL convert all volume values to shares (股).
 - **WHEN** the input volume is already in shares (e.g., 1000000)
 - **THEN** the output SHALL be 1000000
 
-#### Scenario: Volume in手的 (hand)
+#### Scenario: Volume in hand (手)
 - **WHEN** the input volume is in 手 (1手=100股)
 - **THEN** the output SHALL be multiplied by 100
+
+#### Scenario: Volume in wan hand (万手)
+- **WHEN** the input volume is in 万手
+- **THEN** the output SHALL be multiplied by 1000000 (10000 * 100)
 
 ### Requirement: Normalize turnover rate
 
@@ -47,6 +57,10 @@ The normalizer SHALL convert change percent to standard percentage format.
 - **WHEN** the input is "+5.25" or "-3.20"
 - **THEN** the output SHALL preserve the sign as 5.25 or -3.20
 
+#### Scenario: Change percent as decimal
+- **WHEN** the input is 0.0525 (representing 5.25%)
+- **THEN** the output SHALL be 5.25 (multiplied by 100)
+
 ### Requirement: Validate required fields
 
 The normalizer SHALL validate that all required fields are present and non-null.
@@ -63,3 +77,26 @@ The normalizer SHALL log a warning and attempt to use the value as-is when the u
 - **WHEN** a field value has an unrecognized unit
 - **THEN** the normalizer SHALL log a warning and return the value unchanged
 
+### Requirement: Normalize stock code
+
+The normalizer SHALL strip exchange prefixes (sh/sz/bj) from stock codes.
+
+#### Scenario: Code with prefix
+- **WHEN** the input is "sh600519" or "SZ000001"
+- **THEN** the output SHALL be "600519" or "000001" (lowercase, prefix stripped)
+
+#### Scenario: Code without prefix
+- **WHEN** the input is "600519"
+- **THEN** the output SHALL be "600519" (unchanged, lowercased)
+
+### Requirement: Normalize A-share stock list row
+
+The normalizer SHALL filter non-A-share codes when normalizing stock list rows.
+
+#### Scenario: A-share code preserved
+- **WHEN** the input code starts with 6/0/3/8/68
+- **THEN** the row SHALL be returned with code and name
+
+#### Scenario: Non-A-share code filtered
+- **WHEN** the input code does not start with A-share prefixes (e.g., hk00700)
+- **THEN** the output SHALL be `{"code": "", "name": ""}` (empty marker)

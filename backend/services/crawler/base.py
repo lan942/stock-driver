@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from dataclasses import dataclass
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,23 @@ class CrawlerResult:
 
 
 class CrawlerBase(ABC):
+    """爬虫基类：多源切换、限流退避、错误重试。"""
+
+    _RATE_LIMIT_KEYWORDS = (
+        "429",
+        "rate limit",
+        "too many requests",
+        "请求过于频繁",
+        "频率限制",
+        "限流",
+        "访问太频繁",
+        "connection reset",
+        "frequently",
+        "blocked",
+        "forbidden",
+        "403",
+    )
+
     def __init__(
         self,
         sources: Optional[list[dict[str, Any]]] = None,
@@ -33,16 +51,14 @@ class CrawlerBase(ABC):
         self._sources = sources or []
         self._rate_limiter = rate_limiter
         self._current_source_idx = 0
-        self._consecutive_failures = 0
-        self._max_failures_before_switch = 3
 
     @abstractmethod
     def _fetch_from_source(self, source: dict[str, Any], **kwargs: Any) -> Any:
         pass
 
-    @abstractmethod
     def _is_rate_limit_error(self, exc: Exception) -> bool:
-        pass
+        msg = str(exc).lower()
+        return any(keyword in msg for keyword in self._RATE_LIMIT_KEYWORDS)
 
     def fetch(self, **kwargs: Any) -> CrawlerResult:
         if not self._sources:
@@ -61,7 +77,6 @@ class CrawlerBase(ABC):
                     self._rate_limiter.wait_for_slot()
 
                 data = self._fetch_with_retry(source, **kwargs)
-                self._consecutive_failures = 0
                 return CrawlerResult(
                     data=data,
                     success=True,
@@ -76,7 +91,6 @@ class CrawlerBase(ABC):
                 self._switch_to_next_source()
             except Exception as e:
                 last_error = e
-                self._consecutive_failures += 1
                 logger.error(
                     "Fetch failed for source %s: %s",
                     source.get("name", "unknown"),
@@ -101,22 +115,16 @@ class CrawlerBase(ABC):
                 return self._fetch_from_source(source, **kwargs)
             except Exception as e:
                 last_exc = e
-                if self._is_rate_limit_error(e):
-                    wait_time = min(base_wait * (2 ** attempt_idx), max_wait)
-                    logger.warning(
-                        "Rate limit hit, attempt %d/%d, waiting %.1fs",
-                        attempt_idx + 1,
-                        max_retries,
-                        wait_time,
-                    )
-                    if self._rate_limiter:
-                        import time
-                        time.sleep(wait_time)
-                    else:
-                        import time
-                        time.sleep(wait_time)
-                else:
+                if not self._is_rate_limit_error(e):
                     raise
+                wait_time = min(base_wait * (2 ** attempt_idx), max_wait)
+                logger.warning(
+                    "Rate limit hit, attempt %d/%d, waiting %.1fs",
+                    attempt_idx + 1,
+                    max_retries,
+                    wait_time,
+                )
+                time.sleep(wait_time)
 
         raise RateLimitError(
             f"Max retries ({max_retries}) exceeded for source: {source.get('name', 'unknown')}"
@@ -124,16 +132,7 @@ class CrawlerBase(ABC):
 
     def _switch_to_next_source(self) -> None:
         self._current_source_idx = (self._current_source_idx + 1) % len(self._sources)
-        self._consecutive_failures = 0
         logger.info(
             "Switched to source: %s",
             self._sources[self._current_source_idx].get("name", "unknown"),
         )
-
-    @property
-    def current_source(self) -> dict[str, Any]:
-        return self._sources[self._current_source_idx] if self._sources else {}
-
-    @property
-    def available_sources(self) -> list[dict[str, Any]]:
-        return list(self._sources)

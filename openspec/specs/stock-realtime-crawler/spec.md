@@ -53,12 +53,17 @@ The crawler SHALL respect rate limits and implement automatic retry with exponen
 
 #### Scenario: Rate limit detected (HTTP 429 or connection reset)
 - **WHEN** the API returns HTTP 429 or connection reset error
-- **THEN** the crawler SHALL wait with exponential backoff (1s, 2s, 4s, ...) up to 60s max
-- **AND** retry the request up to 3 times before switching to backup interface
+- **THEN** `CrawlerBase._fetch_with_retry` SHALL wait with exponential backoff (1s, 2s, 4s, ...) capped by `max_wait`
+- **AND** retry the source-level request up to `max_retries` (default 3) times before switching to the backup interface
+
+#### Scenario: Direct HTTP internal retries
+- **WHEN** the direct HTTP source (eastmoney_direct_http) is used
+- **THEN** `_http_get_with_retry` SHALL retry HTTP-level failures up to `http_retries` (default 5) times with exponential backoff
+- **AND** these HTTP retries are independent of source-level retries
 
 #### Scenario: All interfaces rate limited
 - **WHEN** all available interfaces for realtime data are rate limited
-- **THEN** the crawler SHALL raise `RateLimitError` with appropriate message
+- **THEN** `CrawlerBase.fetch` SHALL return a `CrawlerResult` with `success=False` containing the last error
 
 ### Requirement: Real-time data saved to StockDaily table
 

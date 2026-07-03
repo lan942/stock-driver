@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
-from backend.services.crawler.base import CrawlerBase, CrawlerError, CrawlerResult
+from backend.services.crawler.base import CrawlerBase, CrawlerError
 from backend.services.crawler.normalizer import normalize_tencent_daily_df
 from backend.services.crawler.rate_limiter import RateLimiter, RateLimitConfig
 
@@ -79,23 +79,6 @@ class TencentStockDailyCrawler(CrawlerBase):
             return df
 
         raise CrawlerError(f"Unsupported source type: {source_type}")
-
-    def _is_rate_limit_error(self, exc: Exception) -> bool:
-        msg = str(exc).lower()
-        rate_limit_keywords = [
-            "429",
-            "rate limit",
-            "too many requests",
-            "请求过于频繁",
-            "频率限制",
-            "限流",
-            "访问太频繁",
-            "frequently",
-            "blocked",
-            "forbidden",
-            "403",
-        ]
-        return any(keyword in msg for keyword in rate_limit_keywords)
 
     def _format_symbol(self, code: str) -> str:
         """将股票代码转换为腾讯格式：sh600519 / sz000001"""
@@ -217,25 +200,9 @@ class TencentStockDailyCrawler(CrawlerBase):
                             logger.warning("Progress callback error: %s", cb_err)
 
                 if idx % 50 == 0:
-                    logger.info("Batch progress: %d/%d (success: %d, failed: %d)", 
+                    logger.info("Batch progress: %d/%d (success: %d, failed: %d)",
                                completed, total, success_count, fail_count)
 
-        logger.info("Batch fetch complete: %d/%d (success: %d, failed: %d)", 
+        logger.info("Batch fetch complete: %d/%d (success: %d, failed: %d)",
                    completed, total, success_count, fail_count)
         return success_count, fail_count, result_dfs
-
-    def fetch_single_raw(
-        self,
-        code: str,
-        start_date: str,
-        end_date: str,
-        adjust: str = "qfq",
-    ) -> CrawlerResult:
-        """获取单只股票原始数据（不归一化）"""
-        symbol = self._format_symbol(code)
-        return self.fetch(
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            adjust=adjust,
-        )
