@@ -114,12 +114,22 @@ class StockListCrawler(CrawlerBase):
         raise CrawlerError(f"Unsupported source type: {source_type}")
 
     def _normalize_spot_dataframe(self, df: pd.DataFrame) -> list[dict[str, Any]]:
-        """从东财实时行情快照中提取股票代码和名称"""
+        """从实时行情快照中提取股票代码和名称，清洗代码格式并过滤非A股"""
         result: list[dict[str, Any]] = []
+        a_share_prefixes = ('6', '0', '3', '8', '68')
         for _, row in df.iterrows():
             try:
                 code = str(row.get('代码', row.get('code', ''))).strip()
                 name = str(row.get('名称', row.get('name', ''))).strip()
+                
+                code = code.lower().replace('sh', '').replace('sz', '').replace('bj', '')
+                
+                if not code.isdigit():
+                    continue
+                
+                if not code.startswith(a_share_prefixes):
+                    continue
+                
                 if code and name:
                     result.append({"code": code, "name": name})
             except Exception as e:

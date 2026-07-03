@@ -305,7 +305,14 @@ def normalize_tencent_daily_df(df: pd.DataFrame, code: str) -> pd.DataFrame:
 
 
 def normalize_stock_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    code = normalize_stock_code(row.get("code", row.get("代码", "")))
+    name = str(row.get("name", row.get("名称", ""))).strip()
+    
+    a_share_prefixes = ('6', '0', '3', '8', '68')
+    if not code.isdigit() or not code.startswith(a_share_prefixes):
+        return {"code": "", "name": ""}
+    
     return {
-        "code": normalize_stock_code(row.get("code", row.get("代码", ""))),
-        "name": str(row.get("name", row.get("名称", ""))).strip(),
+        "code": code,
+        "name": name,
     }

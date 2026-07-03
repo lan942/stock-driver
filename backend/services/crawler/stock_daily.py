@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional
 
 import pandas as pd
@@ -149,9 +151,10 @@ class TencentStockDailyCrawler(CrawlerBase):
         end_date: str,
         adjust: str = "qfq",
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        max_workers: int = 5,
     ) -> tuple[int, int, list[pd.DataFrame]]:
         """
-        批量获取多只股票的日线数据
+        批量获取多只股票的日线数据（多线程并发）
 
         Args:
             codes: 股票代码列表
@@ -159,6 +162,7 @@ class TencentStockDailyCrawler(CrawlerBase):
             end_date: 结束日期，格式 YYYYMMDD
             adjust: 复权类型
             progress_callback: 进度回调函数 (当前序号, 总数, 当前股票代码)
+            max_workers: 最大并发数，默认5
 
         Returns:
             (成功数, 失败数, 成功的DataFrame列表)
@@ -167,21 +171,37 @@ class TencentStockDailyCrawler(CrawlerBase):
         fail_count = 0
         result_dfs: list[pd.DataFrame] = []
         total = len(codes)
+        completed = 0
+        lock = threading.Lock()
 
-        for idx, code in enumerate(codes):
+        def _fetch_one(code: str) -> tuple[str, Optional[pd.DataFrame], Optional[Exception]]:
+            nonlocal completed
             try:
                 df = self.fetch_single(code, start_date, end_date, adjust)
-                result_dfs.append(df)
-                success_count += 1
+                return (code, df, None)
             except Exception as e:
-                fail_count += 1
-                logger.warning("Fetch daily failed for %s: %s", code, e)
+                return (code, None, e)
 
-            if progress_callback:
-                try:
-                    progress_callback(idx + 1, total, code)
-                except Exception as cb_err:
-                    logger.warning("Progress callback error: %s", cb_err)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_fetch_one, code): code for code in codes}
+
+            for future in as_completed(futures):
+                code, df, error = future.result()
+
+                with lock:
+                    completed += 1
+                    if error is None:
+                        success_count += 1
+                        result_dfs.append(df)
+                    else:
+                        fail_count += 1
+                        logger.warning("Fetch daily failed for %s: %s", code, error)
+
+                    if progress_callback:
+                        try:
+                            progress_callback(completed, total, code)
+                        except Exception as cb_err:
+                            logger.warning("Progress callback error: %s", cb_err)
 
         return success_count, fail_count, result_dfs
 
