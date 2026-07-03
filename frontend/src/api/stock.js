@@ -31,15 +31,6 @@ export const stockAPI = {
   updateStockList() {
     return api.post('/crawler/update_list', {}, { timeout: 180000 })
   },
-  updateRealtime(params = {}) {
-    return api.post('/crawler/update_realtime', {
-      force: params.force !== undefined ? params.force : true,
-      date: params.date || null
-    }, { timeout: 180000 })
-  },
-  fetchDaily(code) {
-    return api.post(`/crawler/fetch_daily/${code}`)
-  },
   fetchDailyBatch(params = {}) {
     return api.post('/crawler/fetch_daily_batch', params)
   },
