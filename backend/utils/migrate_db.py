@@ -77,6 +77,54 @@ def verify_migration(engine) -> None:
     print("✓ 迁移验证成功")
 
 
+def add_stock_daily_unique_constraint(engine) -> None:
+    """为stock_daily表添加(code, date)唯一约束"""
+    print("为stock_daily表添加(code, date)唯一约束...")
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA index_list(stock_daily);"))
+        indexes = [row[1] for row in result.fetchall()]
+        if 'uq_stock_daily_code_date' in indexes:
+            print("✓ 唯一约束已存在，跳过")
+            return
+
+        conn.execute(text("BEGIN TRANSACTION"))
+        try:
+            conn.execute(text("""
+                CREATE TABLE stock_daily_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code VARCHAR(20) NOT NULL,
+                    date DATE NOT NULL,
+                    open FLOAT,
+                    high FLOAT,
+                    low FLOAT,
+                    close FLOAT,
+                    volume FLOAT,
+                    turnover FLOAT,
+                    turnover_rate FLOAT,
+                    change_percent FLOAT,
+                    pe FLOAT,
+                    pb FLOAT,
+                    market_cap FLOAT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(code, date)
+                );
+            """))
+            conn.execute(text("""
+                INSERT OR REPLACE INTO stock_daily_new 
+                SELECT id, code, date, open, high, low, close, volume, 
+                       turnover, turnover_rate, change_percent, pe, pb, market_cap, created_at
+                FROM stock_daily;
+            """))
+            conn.execute(text("DROP TABLE stock_daily;"))
+            conn.execute(text("ALTER TABLE stock_daily_new RENAME TO stock_daily;"))
+            conn.commit()
+            print("✓ 唯一约束添加完成")
+        except Exception as e:
+            conn.execute(text("ROLLBACK"))
+            print(f"✗ 添加约束失败: {e}")
+            raise
+
+
 def migrate() -> None:
     """执行完整的数据库迁移"""
     print("=" * 50)
@@ -100,7 +148,10 @@ def migrate() -> None:
     # 步骤3: 为stocks表增加price_date列
     add_price_date_column(engine)
 
-    # 步骤4: 验证迁移
+    # 步骤4: 为stock_daily表添加唯一约束
+    add_stock_daily_unique_constraint(engine)
+
+    # 步骤5: 验证迁移
     verify_migration(engine)
 
     print("\n" + "=" * 50)

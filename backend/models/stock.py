@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from backend.utils.db import Base
 
@@ -45,5 +45,6 @@ class StockDaily(Base):
     created_at = Column(DateTime, server_default=func.now())
     
     __table_args__ = (
+        UniqueConstraint('code', 'date', name='uq_stock_daily_code_date'),
         {'sqlite_autoincrement': True},
     )

@@ -1,19 +1,25 @@
 # stock-realtime-crawler Specification
 
 ## Purpose
-TBD - created by archiving change stock-crawler-base. Update Purpose after archive.
+实时行情爬虫：使用东方财富数据源爬取A股全市场实时行情，支持多源自动切换和速率限制处理。
+
 ## Requirements
-### Requirement: Fetch realtime quotes for multiple stocks
+### Requirement: Fetch realtime quotes for multiple stocks with fallback
 
-爬虫 SHALL 仅使用东方财富数据源（akshare `stock_zh_a_spot_em`），禁用新浪数据源切换逻辑。
+爬虫 SHALL 优先使用直连东方财富push2 HTTP API获取实时行情，主源失败时自动切换到akshare封装的东方财富接口（stock_zh_a_spot_em）。
 
-#### Scenario: Successful fetch using Eastmoney only
+#### Scenario: Successful fetch using Eastmoney direct HTTP
 - **WHEN** 爬虫被调用获取实时行情
-- **THEN** 爬虫 SHALL 直接调用akshare `stock_zh_a_spot_em`接口
-- **AND** 若接口返回错误（ConnectionError/RemoteDisconnected），SHALL 直接抛出异常，不尝试切换到新浪数据源
+- **THEN** 爬虫 SHALL 优先调用直连东方财富push2 API（https://push2.eastmoney.com/api/qt/clist/get）
+- **AND** 若接口返回成功，SHALL 返回标准化后的行情数据
 
-#### Scenario: Eastmoney API failure
-- **WHEN** 东方财富API返回错误（ConnectionError/RemoteDisconnected）
+#### Scenario: Fallback to akshare on direct HTTP failure
+- **WHEN** 直连东方财富HTTP API失败（ConnectionError/RemoteDisconnected/超时）
+- **THEN** 爬虫 SHALL 自动切换到akshare的stock_zh_a_spot_em接口重试
+- **AND** 若akshare接口成功，SHALL 返回标准化后的行情数据
+
+#### Scenario: All sources failed
+- **WHEN** 直连HTTP和akshare接口均失败
 - **THEN** 爬虫 SHALL 抛出CrawlerError异常
 - **AND** 错误信息SHALL 记录到CrawlStatus的error_message字段
 
@@ -45,8 +51,8 @@ The crawler SHALL return the following fields with standardized units:
 
 The crawler SHALL respect rate limits and implement automatic retry with exponential backoff.
 
-#### Scenario: Rate limit detected (HTTP 429)
-- **WHEN** the API returns HTTP 429
+#### Scenario: Rate limit detected (HTTP 429 or connection reset)
+- **WHEN** the API returns HTTP 429 or connection reset error
 - **THEN** the crawler SHALL wait with exponential backoff (1s, 2s, 4s, ...) up to 60s max
 - **AND** retry the request up to 3 times before switching to backup interface
 
@@ -54,17 +60,16 @@ The crawler SHALL respect rate limits and implement automatic retry with exponen
 - **WHEN** all available interfaces for realtime data are rate limited
 - **THEN** the crawler SHALL raise `RateLimitError` with appropriate message
 
-### Requirement: Update Stock price_date on realtime crawl
+### Requirement: Real-time data saved to StockDaily table
 
-系统 SHALL 在每次实时行情爬取成功后，更新Stock记录的price_date字段。
+系统 SHALL 在每次实时行情爬取成功后，将数据写入StockDaily表（而非Stock表），以支持历史数据回溯。
 
-#### Scenario: price_date updated on successful crawl
+#### Scenario: realtime data saved to StockDaily
 - **WHEN** 实时行情爬取成功获取股票价格数据
-- **THEN** 系统 SHALL 更新Stock记录的price_date为当前日期（Date类型，不含时间戳）
-- **AND** 同时更新price、change_percent、volume、turnover等字段
+- **THEN** 系统 SHALL 将数据写入StockDaily表，包含open、close、high、low、volume、turnover、turnover_rate、change_percent、pe、pb、market_cap字段
+- **AND** date字段设置为当前日期（Date类型，不含时间戳）
 
-#### Scenario: price_date not updated on failed crawl
+#### Scenario: data not saved on failed crawl
 - **WHEN** 实时行情爬取失败
-- **THEN** 系统 SHALL NOT 更新Stock记录的price_date
-- **AND** 保持price_date为上次成功爬取的日期或NULL
-
+- **THEN** 系统 SHALL NOT 写入StockDaily表
+- **AND** 创建failed状态的CrawlStatus记录

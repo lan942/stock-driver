@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 import time
 import threading
 from datetime import date, datetime
+from sqlalchemy import func
 from backend.services.analysis import StockAnalysis
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
@@ -55,49 +56,8 @@ def _build_daily_result(d, stock):
     }
 
 
-def _get_stocks_fallback(page, per_page, code=None, name=None):
-    """回退：StockDaily 表无数据时查 Stock 表"""
-    db = next(get_db())
-    query = db.query(Stock)
-    if code:
-        query = query.filter(Stock.code.like(f'%{code}%'))
-    if name:
-        query = query.filter(Stock.name.like(f'%{name}%'))
-    total = query.count()
-    stocks = query.order_by(Stock.code).offset((page - 1) * per_page).limit(per_page).all()
-    result = [{
-        'id': s.id,
-        'code': s.code,
-        'name': s.name,
-        'industry': s.industry,
-        'sector': s.sector,
-        'price': s.price,
-        'open': s.open,
-        'high': s.high,
-        'low': s.low,
-        'price_date': s.price_date.strftime('%Y-%m-%d') if s.price_date else None,
-        'change_percent': s.change_percent,
-        'volume': s.volume,
-        'turnover': s.turnover,
-        'turnover_rate': s.turnover_rate,
-        'pe': s.pe,
-        'pb': s.pb,
-        'market_cap': s.market_cap,
-    } for s in stocks]
-    db.close()
-    return jsonify({
-        'data': result,
-        'total': total,
-        'page': page,
-        'per_page': per_page,
-    })
-
-
 @api.route('/stocks', methods=['GET'])
 def get_stocks():
-    from backend.models.stock import StockDaily
-    from sqlalchemy import func
-
     db = next(get_db())
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
@@ -106,10 +66,6 @@ def get_stocks():
     search_name = request.args.get('name', None)
 
     max_date = db.query(func.max(StockDaily.date)).scalar()
-
-    if max_date is None:
-        db.close()
-        return _get_stocks_fallback(page, per_page, search_code, search_name)
 
     has_search = bool(search_code or search_name)
     has_date_filter = bool(query_date and query_date.strip())
