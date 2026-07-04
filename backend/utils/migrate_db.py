@@ -77,6 +77,55 @@ def verify_migration(engine) -> None:
     print("✓ 迁移验证成功")
 
 
+def create_portfolio_tables(engine) -> None:
+    """创建持仓相关的表"""
+    print("创建portfolio表...")
+    create_portfolio_sql = """
+    CREATE TABLE IF NOT EXISTS portfolio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code VARCHAR(20) NOT NULL,
+        quantity INTEGER NOT NULL,
+        cost_price FLOAT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    with engine.connect() as conn:
+        conn.execute(text(create_portfolio_sql))
+        conn.commit()
+    print("✓ portfolio表创建完成")
+
+    print("创建transactions表...")
+    create_transactions_sql = """
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type VARCHAR(10) NOT NULL,
+        code VARCHAR(20) NOT NULL,
+        quantity INTEGER NOT NULL,
+        price FLOAT NOT NULL,
+        amount FLOAT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    with engine.connect() as conn:
+        conn.execute(text(create_transactions_sql))
+        conn.commit()
+    print("✓ transactions表创建完成")
+
+    print("创建cash_balance表...")
+    create_cash_sql = """
+    CREATE TABLE IF NOT EXISTS cash_balance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        balance FLOAT NOT NULL DEFAULT 0.0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    with engine.connect() as conn:
+        conn.execute(text(create_cash_sql))
+        conn.commit()
+    print("✓ cash_balance表创建完成")
+
+
 def add_stock_daily_unique_constraint(engine) -> None:
     """为stock_daily表添加(code, date)唯一约束"""
     print("为stock_daily表添加(code, date)唯一约束...")
@@ -148,7 +197,10 @@ def migrate() -> None:
     # 步骤3: 为stocks表增加price_date列
     add_price_date_column(engine)
 
-    # 步骤4: 为stock_daily表添加唯一约束
+    # 步骤4: 创建持仓相关的表
+    create_portfolio_tables(engine)
+
+    # 步骤5: 为stock_daily表添加唯一约束
     add_stock_daily_unique_constraint(engine)
 
     # 步骤5: 验证迁移

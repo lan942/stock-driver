@@ -9,6 +9,9 @@ export const stockAPI = {
   getStocks(params) {
     return api.get('/stocks', { params })
   },
+  searchStocks(query) {
+    return api.get('/stocks/search', { params: { q: query } })
+  },
   getStock(code) {
     return api.get(`/stocks/${code}`)
   },
@@ -39,6 +42,33 @@ export const stockAPI = {
   },
   getDailySummary(params = {}) {
     return api.get('/stocks/daily_summary', { params })
+  },
+  getPortfolioOverview() {
+    return api.get('/portfolio/overview')
+  },
+  getHoldings() {
+    return api.get('/portfolio/holdings')
+  },
+  addHolding(data) {
+    return api.post('/portfolio/holdings', data)
+  },
+  updateHolding(id, data) {
+    return api.put(`/portfolio/holdings/${id}`, data)
+  },
+  deleteHolding(id) {
+    return api.delete(`/portfolio/holdings/${id}`)
+  },
+  getTransactions(limit = 50) {
+    return api.get('/portfolio/transactions', { params: { limit } })
+  },
+  addTransaction(data) {
+    return api.post('/portfolio/transactions', data)
+  },
+  clearTransactions() {
+    return api.delete('/portfolio/transactions')
+  },
+  updateCashBalance(amount) {
+    return api.post('/portfolio/cash', { amount })
   }
 }
 

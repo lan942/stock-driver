@@ -20,6 +20,17 @@ from backend.services.stock_service import (
     get_daily_summary,
 )
 from backend.services.scheduler import get_scheduler
+from backend.services.portfolio_service import (
+    get_portfolio_overview,
+    get_holdings,
+    add_holding,
+    update_holding,
+    delete_holding,
+    get_transactions,
+    add_transaction,
+    clear_all_transactions,
+    update_cash_balance,
+)
 
 api = Blueprint('api', __name__)
 
@@ -115,6 +126,27 @@ def get_stocks():
         resp['price_date'] = q_date.strftime('%Y-%m-%d')
     resp['latest_date'] = max_date.strftime('%Y-%m-%d') if max_date else None
     return jsonify(resp)
+
+
+@api.route('/stocks/search', methods=['GET'])
+def search_stocks():
+    """搜索股票基本信息（Stock 表，每只股票一条记录）"""
+    db = next(get_db())
+    query_str = request.args.get('q', '').strip()
+
+    if not query_str:
+        db.close()
+        return jsonify({'data': []})
+
+    results = []
+    if query_str.isdigit():
+        results = db.query(Stock).filter(Stock.code.like(f'%{query_str}%')).limit(20).all()
+    if not results:
+        results = db.query(Stock).filter(Stock.name.like(f'%{query_str}%')).limit(20).all()
+
+    data = [{'code': s.code, 'name': s.name} for s in results]
+    db.close()
+    return jsonify({'data': data})
 
 
 @api.route('/stocks/<code>', methods=['GET'])
@@ -562,3 +594,93 @@ def run_job(job_id):
     scheduler = get_scheduler()
     scheduler.run_job(job_id)
     return jsonify({'message': f'任务 {job_id} 已立即执行'})
+
+
+@api.route('/portfolio/overview', methods=['GET'])
+def portfolio_overview():
+    overview = get_portfolio_overview()
+    return jsonify(overview)
+
+
+@api.route('/portfolio/holdings', methods=['GET'])
+def portfolio_holdings():
+    holdings = get_holdings()
+    return jsonify(holdings)
+
+
+@api.route('/portfolio/holdings', methods=['POST'])
+def portfolio_add_holding():
+    data = request.get_json(silent=True) or {}
+    code = data.get('code')
+    quantity = data.get('quantity')
+    cost_price = data.get('cost_price')
+
+    if not code or quantity is None or cost_price is None:
+        return jsonify({'error': '缺少必要参数: code, quantity, cost_price'}), 400
+
+    result = add_holding(code, quantity, cost_price)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@api.route('/portfolio/holdings/<int:holding_id>', methods=['PUT'])
+def portfolio_update_holding(holding_id):
+    data = request.get_json(silent=True) or {}
+    quantity = data.get('quantity')
+    cost_price = data.get('cost_price')
+
+    result = update_holding(holding_id, quantity, cost_price)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@api.route('/portfolio/holdings/<int:holding_id>', methods=['DELETE'])
+def portfolio_delete_holding(holding_id):
+    result = delete_holding(holding_id)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@api.route('/portfolio/transactions', methods=['GET'])
+def portfolio_transactions():
+    limit = request.args.get('limit', 50, type=int)
+    transactions = get_transactions(limit)
+    return jsonify(transactions)
+
+
+@api.route('/portfolio/transactions', methods=['POST'])
+def portfolio_add_transaction():
+    data = request.get_json(silent=True) or {}
+    tx_type = data.get('type')
+    code = data.get('code')
+    quantity = data.get('quantity')
+    price = data.get('price')
+
+    if not tx_type or not code or quantity is None or price is None:
+        return jsonify({'error': '缺少必要参数: type, code, quantity, price'}), 400
+
+    result = add_transaction(tx_type, code, quantity, price)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@api.route('/portfolio/transactions', methods=['DELETE'])
+def portfolio_clear_transactions():
+    result = clear_all_transactions()
+    return jsonify(result)
+
+
+@api.route('/portfolio/cash', methods=['POST'])
+def portfolio_update_cash():
+    data = request.get_json(silent=True) or {}
+    amount = data.get('amount')
+
+    if amount is None:
+        return jsonify({'error': '缺少必要参数: amount'}), 400
+
+    result = update_cash_balance(amount)
+    return jsonify(result)
