@@ -3,6 +3,7 @@ import StockList from '../views/StockList.vue'
 import StockDetail from '../views/StockDetail.vue'
 import TopStocks from '../views/TopStocks.vue'
 import Crawler from '../views/Crawler.vue'
+import DataSummary from '../views/DataSummary.vue'
 
 const routes = [
   {
@@ -24,6 +25,11 @@ const routes = [
     path: '/crawler',
     name: 'Crawler',
     component: Crawler
+  },
+  {
+    path: '/data-summary',
+    name: 'DataSummary',
+    component: DataSummary
   }
 ]
 

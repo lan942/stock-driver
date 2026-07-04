@@ -224,3 +224,56 @@ def has_today_success_record(crawl_type: str, today: date) -> bool:
     except Exception as e:
         logger.error(f"检查今日爬取记录失败: {e}")
         return False
+
+
+def get_daily_summary(start_date: Optional[date] = None, end_date: Optional[date] = None) -> list[dict]:
+    """
+    获取每日数据统计摘要
+
+    Args:
+        start_date: 起始日期，默认为数据库中最早日期
+        end_date: 结束日期，默认为数据库中最晚日期
+
+    Returns:
+        每日统计列表，包含 date, count, total_stocks, coverage_percent
+    """
+    from sqlalchemy import func
+    from datetime import timedelta
+    from backend.utils.trading_day import is_trading_day
+
+    db = next(get_db())
+
+    if end_date is None:
+        end_date = date.today()
+    if start_date is None:
+        start_date = end_date - timedelta(days=90)
+
+    total_stocks = db.query(Stock).count()
+
+    query = db.query(
+        StockDaily.date,
+        func.count(StockDaily.code).label('count')
+    ).filter(
+        StockDaily.date >= start_date,
+        StockDaily.date <= end_date
+    ).group_by(StockDaily.date)
+
+    results = query.all()
+    data_map = {row.date: row.count for row in results}
+
+    summary = []
+    current = end_date
+    while current >= start_date:
+        if is_trading_day(current):
+            count = data_map.get(current, 0)
+            coverage = (count / total_stocks) * 100 if total_stocks > 0 else 0
+            summary.append({
+                'date': current.strftime('%Y-%m-%d'),
+                'count': count,
+                'total_stocks': total_stocks,
+                'coverage_percent': round(coverage, 2)
+            })
+        current -= timedelta(days=1)
+
+    db.close()
+    return summary

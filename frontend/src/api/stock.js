@@ -36,6 +36,9 @@ export const stockAPI = {
   },
   getDailyProgress() {
     return api.get('/crawler/progress/daily')
+  },
+  getDailySummary(params = {}) {
+    return api.get('/stocks/daily_summary', { params })
   }
 }
 

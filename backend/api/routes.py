@@ -17,6 +17,7 @@ from backend.services.stock_service import (
     save_daily_batch,
     record_crawl_status,
     has_today_success_record,
+    get_daily_summary,
 )
 from backend.services.scheduler import get_scheduler
 
@@ -241,6 +242,30 @@ def get_top_losers():
 
     db.close()
     return jsonify(result)
+
+
+@api.route('/stocks/daily_summary', methods=['GET'])
+def get_stocks_daily_summary():
+    start_date_str = request.args.get('start_date', None)
+    end_date_str = request.args.get('end_date', None)
+
+    start_date = None
+    end_date = None
+
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': '起始日期格式错误，应为 YYYY-MM-DD'}), 400
+
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': '结束日期格式错误，应为 YYYY-MM-DD'}), 400
+
+    summary = get_daily_summary(start_date, end_date)
+    return jsonify(summary)
 
 
 @api.route('/crawler/update_list', methods=['POST'])

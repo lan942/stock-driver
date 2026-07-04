@@ -96,9 +96,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { stockAPI } from '../api/stock'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 const stocks = ref([])
 const queryDate = ref('')
 const priceDate = ref('')
@@ -165,6 +166,9 @@ const goToDetail = (row) => {
 }
 
 onMounted(async () => {
+  if (route.query.date) {
+    queryDate.value = route.query.date
+  }
   await loadStocks()
   if (!queryDate.value && latestDate.value) {
     queryDate.value = latestDate.value
@@ -175,8 +179,7 @@ onMounted(async () => {
 
 <style scoped>
 .stock-list {
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0 20px;
 }
 
 .search-bar {
