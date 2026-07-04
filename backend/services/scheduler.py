@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.base import JobLookupError
 
+from backend.services.crawler.base import CrawlerError
 from backend.services.crawler.stock_list import StockListCrawler
 from backend.services.crawler.stock_realtime import StockRealtimeCrawler
 from backend.services.crawler.stock_daily import TencentStockDailyCrawler
@@ -93,15 +94,25 @@ class CrawlScheduler:
             )
             logger.info(f"股票列表更新完成，成功 {success_count} 只股票")
 
-        except Exception as e:
-            logger.error(f"股票列表更新失败: {e}")
+        except CrawlerError as e:
+            logger.error(f"股票列表更新失败（上游数据源不可用）: {e}")
             record_crawl_status(
                 crawl_type="list",
                 status="failed",
                 crawl_time=crawl_time,
                 success_count=0,
                 fail_count=0,
-                error_message=str(e)
+                error_message=f"上游数据源不可用: {e}"
+            )
+        except Exception as e:
+            logger.error(f"股票列表更新失败（程序异常）: {e}", exc_info=True)
+            record_crawl_status(
+                crawl_type="list",
+                status="failed",
+                crawl_time=crawl_time,
+                success_count=0,
+                fail_count=0,
+                error_message=f"程序异常: {e}"
             )
 
     def _update_realtime_quotes(self):

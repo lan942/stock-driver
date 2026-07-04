@@ -7,7 +7,8 @@ from backend.services.analysis import StockAnalysis
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
 from backend.models.crawl_status import CrawlStatus
-from backend.services.crawler.stock_list import StockListCrawler
+from backend.services.crawler.base import CrawlerError
+from backend.services.crawler.stock_list import StockListCrawler, DEFAULT_SOURCES as STOCK_LIST_SOURCES
 from backend.services.crawler.stock_realtime import StockRealtimeCrawler
 from backend.services.crawler.stock_daily import TencentStockDailyCrawler
 from backend.services.stock_service import (
@@ -245,11 +246,45 @@ def get_top_losers():
 @api.route('/crawler/update_list', methods=['POST'])
 def update_stock_list():
     start_time = time.time()
+    sources_tried = [s.get("name", "unknown") for s in STOCK_LIST_SOURCES]
     crawler = StockListCrawler()
-    df = crawler.fetch_stock_list_df()
+    try:
+        df = crawler.fetch_stock_list_df()
+    except CrawlerError as e:
+        elapsed = round(time.time() - start_time, 1)
+        record_crawl_status(
+            crawl_type="list",
+            status="failed",
+            success_count=0,
+            fail_count=0,
+            error_message=str(e),
+        )
+        return jsonify({
+            'message': '获取股票列表失败',
+            'error': str(e),
+            'sources_tried': sources_tried,
+            'success_count': 0,
+            'fail_count': 0,
+            'elapsed': elapsed,
+        }), 503
+
     elapsed = round(time.time() - start_time, 1)
     if df.empty:
-        return jsonify({'message': '获取股票列表失败', 'success_count': 0, 'fail_count': 0, 'elapsed': elapsed}), 500
+        record_crawl_status(
+            crawl_type="list",
+            status="failed",
+            success_count=0,
+            fail_count=0,
+            error_message="返回空数据",
+        )
+        return jsonify({
+            'message': '获取股票列表为空',
+            'error': '返回空数据',
+            'sources_tried': sources_tried,
+            'success_count': 0,
+            'fail_count': 0,
+            'elapsed': elapsed,
+        }), 503
 
     success_count, fail_count = save_stock_list(df)
     record_crawl_status(

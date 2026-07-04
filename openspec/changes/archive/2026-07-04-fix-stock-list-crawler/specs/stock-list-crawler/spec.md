@@ -1,9 +1,5 @@
-# stock-list-crawler Specification
+## MODIFIED Requirements
 
-## Purpose
-股票列表爬虫：从多个数据源获取A股股票代码和名称列表，支持主备源自动切换，确保列表数据的准确性和完整性。
-
-## Requirements
 ### Requirement: Fetch stock list from primary source
 
 The crawler SHALL fetch the A-share stock list from a primary source that combines the Shanghai Stock Exchange direct interface (`stock_info_sh_name_code(symbol='主板A股')`) and the Shenzhen Stock Exchange direct interface (`stock_info_sz_name_code(symbol='A股列表')`), merging and de-duplicating by `code`. This replaces the previous aggregate interface `stock_info_a_code_name` which transitively depends on the Beijing Stock Exchange endpoint and fails when BSE is unreachable.
@@ -41,42 +37,7 @@ The crawler SHALL fetch the A-share stock list from a primary source that combin
 - **AND** 错误信息 SHALL 包含最近一次异常的描述
 - **AND** 调用方 SHALL 将错误信息记录到 `CrawlStatus.error_message` 字段
 
-### Requirement: Return normalized data format
-
-The crawler SHALL return stock list data in a standardized format:
-```python
-{
-    "code": str,   # Stock code, e.g., "600519"
-    "name": str,   # Stock name, e.g., "贵州茅台"
-}
-```
-
-#### Scenario: Data returned in normalized format
-- **WHEN** the crawler successfully fetches stock list
-- **THEN** each item SHALL contain only `code` and `name` fields
-- **AND** code字段 SHALL 为纯数字字符串（不含前缀）
-
-### Requirement: Handle fetch errors gracefully
-
-The crawler SHALL log errors and raise exceptions for critical failures without crashing the entire process.
-
-#### Scenario: Network error occurs
-- **WHEN** a network error occurs during fetch
-- **THEN** the crawler SHALL raise a `CrawlerError` with descriptive message
-
-#### Scenario: Empty data from all sources
-- **WHEN** 所有数据源返回空数据
-- **THEN** `CrawlerBase.fetch` SHALL 返回 `CrawlerResult(success=False)`，错误信息为 "All sources failed"
-- **AND** 调用方（如 `fetch_stock_list`）SHALL 据此抛出 `CrawlerError`
-
-### Requirement: Rate limit handling
-
-The crawler SHALL implement rate limiting to avoid being blocked by data sources.
-
-#### Scenario: Rate limit detected
-- **WHEN** 数据源返回速率限制错误（HTTP 429/请求过于频繁）
-- **THEN** 爬虫 SHALL 使用指数退避策略重试
-- **AND** 最大重试等待时间不超过60秒
+## ADDED Requirements
 
 ### Requirement: Beijing Stock Exchange as optional supplementary source
 
