@@ -4,6 +4,7 @@ import threading
 from datetime import date, datetime
 from sqlalchemy import func
 from backend.services.analysis import StockAnalysis
+from backend.services.indicator_engine import IndicatorEngine
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
 from backend.models.crawl_status import CrawlStatus
@@ -216,6 +217,55 @@ def get_stock_chart(code):
     } for item in reversed(daily_data)]
 
     return jsonify(result)
+
+
+@api.route('/stocks/<code>/indicators', methods=['GET'])
+def get_stock_indicators(code):
+    """获取股票技术指标（Backtrader 计算）"""
+    days = request.args.get('days', 120, type=int)
+    indicators_str = request.args.get('indicators', '')
+    params_str = request.args.get('params', '{}')
+
+    # 解析指标列表
+    if indicators_str:
+        indicator_names = [name.strip() for name in indicators_str.split(',') if name.strip()]
+    else:
+        indicator_names = ['MA', 'EMA', 'MACD', 'RSI', 'BOLL', 'KDJ', 'ATR', 'ADX']
+
+    # 解析自定义参数
+    import json as _json
+    try:
+        custom_params = _json.loads(params_str)
+    except (ValueError, TypeError):
+        custom_params = {}
+
+    # 构建指标配置
+    configs = []
+    for name in indicator_names:
+        cfg = {'type': name, 'params': custom_params.get(name, {})}
+        configs.append(cfg)
+
+    try:
+        result = IndicatorEngine.compute(code, configs, days)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    if result is None:
+        # 检查股票是否存在
+        db = next(get_db())
+        stock = db.query(Stock).filter(Stock.code == code).first()
+        db.close()
+        if not stock:
+            return jsonify({'error': '股票不存在'}), 404
+        return jsonify({'error': '没有找到数据'}), 404
+
+    return jsonify(result)
+
+
+@api.route('/stocks/<code>/indicators/list', methods=['GET'])
+def get_stock_indicators_list(code):
+    """返回可用的技术指标清单"""
+    return jsonify({'indicators': IndicatorEngine.get_indicator_list()})
 
 
 @api.route('/stocks/top/gainers', methods=['GET'])
