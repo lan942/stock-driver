@@ -1,7 +1,7 @@
 # daily-data-summary Specification
 
 ## Purpose
-TBD - created by archiving change add-daily-data-summary. Update Purpose after archive.
+提供每日数据统计概览功能，让用户能够查看数据库中每天的数据覆盖情况，识别需要补充数据的日期。
 ## Requirements
 ### Requirement: Daily data summary API
 The system SHALL provide a GET API endpoint `/stocks/daily_summary` that returns the count of StockDaily records grouped by date.

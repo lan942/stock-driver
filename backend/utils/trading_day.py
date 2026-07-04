@@ -10,14 +10,6 @@ HOLIDAYS_2026 = [
     "10-08",
 ]
 
-WORKING_WEEKENDS_2026 = [
-    "2026-02-14",
-    "2026-02-23",
-    "2026-04-12",
-    "2026-05-31",
-    "2026-10-10",
-]
-
 def is_weekend(d: date) -> bool:
     return d.weekday() >= 5
 
@@ -25,16 +17,9 @@ def is_holiday(d: date) -> bool:
     month_day = d.strftime("%m-%d")
     return month_day in HOLIDAYS_2026
 
-def is_working_weekend(d: date) -> bool:
-    full_date = d.strftime("%Y-%m-%d")
-    return full_date in WORKING_WEEKENDS_2026
-
 def is_trading_day(d: date = None) -> bool:
     if d is None:
         d = date.today()
-    
-    if is_working_weekend(d):
-        return True
     
     if is_weekend(d):
         return False

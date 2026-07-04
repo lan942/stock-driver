@@ -31,21 +31,21 @@
       </el-card>
     </div>
 
-    <el-table :data="summaryData" border style="width: 100%" :default-sort="{ prop: 'date', order: 'descending' }">
-      <el-table-column prop="date" label="日期" width="140" sortable />
-      <el-table-column prop="count" label="数据条数" width="120" sortable>
+    <el-table :data="summaryData" border style="width: 100%" :default-sort="{ prop: 'date', order: 'descending' }" fit class="equal-width-table">
+      <el-table-column prop="date" label="日期" sortable />
+      <el-table-column prop="count" label="数据条数" sortable>
         <template #default="{ row }">
           <span :class="{ 'low-count': row.count < row.total_stocks * 0.9 }">
             {{ row.count.toLocaleString() }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column prop="total_stocks" label="总股票数" width="120">
+      <el-table-column prop="total_stocks" label="总股票数">
         <template #default="{ row }">
           {{ row.total_stocks.toLocaleString() }}
         </template>
       </el-table-column>
-      <el-table-column prop="coverage_percent" label="覆盖率" width="200" sortable>
+      <el-table-column prop="coverage_percent" label="覆盖率" sortable>
         <template #default="{ row }">
           <div class="coverage-cell">
             <el-progress
@@ -60,7 +60,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="120">
+      <el-table-column label="操作">
         <template #default="{ row }">
           <el-button size="small" @click="goToStockList(row.date)">查看当日数据</el-button>
         </template>
@@ -197,5 +197,10 @@ onMounted(async () => {
   font-weight: 600;
   min-width: 60px;
   text-align: right;
+}
+
+.equal-width-table :deep(.el-table__header-wrapper) colgroup col,
+.equal-width-table :deep(.el-table__body-wrapper) colgroup col {
+  width: 20% !important;
 }
 </style>
