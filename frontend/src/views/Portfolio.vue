@@ -623,11 +623,11 @@ onMounted(() => {
 }
 
 .profit-positive {
-  color: #ef4444;
+  color: #22c55e;
 }
 
 .profit-negative {
-  color: #22c55e;
+  color: #ef4444;
 }
 
 .profit-rate {

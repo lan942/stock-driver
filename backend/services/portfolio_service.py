@@ -94,6 +94,10 @@ def get_holdings() -> List[Dict[str, Any]]:
 
 def add_holding(code: str, quantity: int, cost_price: float) -> Dict[str, Any]:
     """添加持仓"""
+    # 验证数量必须是100的整数倍
+    if quantity % 100 != 0:
+        return {'error': '数量必须是100的整数倍'}
+    
     db = next(get_db())
 
     stock = db.query(Stock).filter(Stock.code == code).first()
@@ -223,6 +227,10 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
 
 def add_transaction(tx_type: str, code: str, quantity: int, price: float) -> Dict[str, Any]:
     """添加交易记录"""
+    # 验证数量必须是100的整数倍
+    if quantity % 100 != 0:
+        return {'error': '数量必须是100的整数倍'}
+    
     db = next(get_db())
 
     if tx_type not in ('buy', 'sell'):
@@ -236,6 +244,16 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float) -> Dic
 
     stock_name = stock.name
 
+    # 如果是卖出，验证持仓数量
+    if tx_type == 'sell':
+        holding = db.query(Portfolio).filter(Portfolio.code == code).first()
+        if not holding:
+            db.close()
+            return {'error': f'股票 {code} 没有持仓，无法卖出'}
+        if quantity > holding.quantity:
+            db.close()
+            return {'error': f'卖出数量不能超过持仓数量 ({holding.quantity} 股)'}
+
     amount = quantity * price
     transaction = Transaction(
         type=tx_type,
@@ -247,6 +265,16 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float) -> Dic
     db.add(transaction)
     db.commit()
     db.refresh(transaction)
+
+    # 如果是卖出，更新持仓数量
+    if tx_type == 'sell':
+        holding = db.query(Portfolio).filter(Portfolio.code == code).first()
+        if holding:
+            holding.quantity -= quantity
+            # 如果持仓数量为0，删除该持仓
+            if holding.quantity == 0:
+                db.delete(holding)
+            db.commit()
 
     db.close()
 

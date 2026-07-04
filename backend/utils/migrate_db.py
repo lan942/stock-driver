@@ -1,4 +1,4 @@
-"""数据库迁移脚本：为stocks表增加price_date字段，创建crawl_status表"""
+"""数据库迁移脚本：创建crawl_status表和portfolio相关表"""
 import os
 import shutil
 from datetime import datetime
@@ -36,22 +36,6 @@ def create_crawl_status_table(engine) -> None:
     print("✓ crawl_status表创建完成")
 
 
-def add_price_date_column(engine) -> None:
-    """为stocks表增加price_date列"""
-    print("为stocks表增加price_date列...")
-    alter_table_sql = "ALTER TABLE stocks ADD COLUMN price_date DATE;"
-    try:
-        with engine.connect() as conn:
-            conn.execute(text(alter_table_sql))
-            conn.commit()
-        print("✓ price_date列添加完成")
-    except Exception as e:
-        if "duplicate column name" in str(e).lower():
-            print("price_date列已存在，跳过添加")
-        else:
-            raise
-
-
 def verify_migration(engine) -> None:
     """验证迁移结果"""
     print("\n验证迁移结果...")
@@ -65,13 +49,28 @@ def verify_migration(engine) -> None:
             print("✗ crawl_status表不存在")
             return
 
-        # 检查stocks表的列
-        result = conn.execute(text("PRAGMA table_info(stocks);"))
-        columns = [row[1] for row in result.fetchall()]
-        if 'price_date' in columns:
-            print("✓ stocks表包含price_date列")
+        # 检查portfolio表是否存在
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='portfolio';"))
+        if result.fetchone():
+            print("✓ portfolio表存在")
         else:
-            print("✗ stocks表缺少price_date列")
+            print("✗ portfolio表不存在")
+            return
+
+        # 检查transactions表是否存在
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions';"))
+        if result.fetchone():
+            print("✓ transactions表存在")
+        else:
+            print("✗ transactions表不存在")
+            return
+
+        # 检查cash_balance表是否存在
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='cash_balance';"))
+        if result.fetchone():
+            print("✓ cash_balance表存在")
+        else:
+            print("✗ cash_balance表不存在")
             return
 
     print("✓ 迁移验证成功")
@@ -194,13 +193,10 @@ def migrate() -> None:
     # 步骤2: 创建crawl_status表
     create_crawl_status_table(engine)
 
-    # 步骤3: 为stocks表增加price_date列
-    add_price_date_column(engine)
-
-    # 步骤4: 创建持仓相关的表
+    # 步骤3: 创建持仓相关的表
     create_portfolio_tables(engine)
 
-    # 步骤5: 为stock_daily表添加唯一约束
+    # 步骤4: 为stock_daily表添加唯一约束
     add_stock_daily_unique_constraint(engine)
 
     # 步骤5: 验证迁移
