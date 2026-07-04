@@ -7,8 +7,8 @@ Manage portfolio data including stock holdings, transactions, and cash balance w
 The system SHALL maintain a Portfolio model that tracks user's stock holdings, including stock code, quantity, and average cost price.
 
 #### Scenario: Create new portfolio entry
-- **WHEN** user adds a new stock holding with code, quantity, and cost price
-- **THEN** system creates a new Portfolio record with the provided information
+- **WHEN** user adds a new stock holding with code, quantity (must be multiple of 100), and cost price
+- **THEN** system validates quantity % 100 === 0, creates a new Portfolio record
 
 #### Scenario: Update portfolio entry
 - **WHEN** user modifies an existing portfolio entry's quantity or cost price
@@ -23,11 +23,29 @@ The system SHALL maintain a Transaction model that records all stock buy and sel
 
 #### Scenario: Record buy transaction
 - **WHEN** user buys stock and records the transaction
-- **THEN** system creates a Transaction record with type 'buy', stock code, quantity, price, and current timestamp
+- **THEN** system validates quantity % 100 === 0, creates a Transaction record with type 'buy', stock code, quantity, price, and current timestamp
 
 #### Scenario: Record sell transaction
 - **WHEN** user sells stock and records the transaction
-- **THEN** system creates a Transaction record with type 'sell', stock code, quantity, price, and current timestamp
+- **THEN** system validates quantity % 100 === 0, verifies quantity <= holding quantity, creates a Transaction record with type 'sell', and updates the holding quantity
+
+#### Scenario: Sell quantity validation
+- **WHEN** user attempts to sell more shares than held
+- **THEN** system rejects the transaction with an error message
+
+### Requirement: Stock search from StockBasic table
+The system SHALL search stocks from the StockBasic table (stock metadata) rather than the StockDaily table (daily price data).
+
+#### Scenario: Search stocks by keyword
+- **WHEN** user types a search query
+- **THEN** system queries StockBasic table matching code or name, returns unique results
+
+### Requirement: Clear all transactions
+The system SHALL support clearing all transaction records at once.
+
+#### Scenario: Clear all transaction records
+- **WHEN** user requests to clear all transactions
+- **THEN** system deletes all Transaction records from the database
 
 ### Requirement: Cash balance management
 The system SHALL track the user's cash balance, allowing updates when money is deposited or withdrawn.

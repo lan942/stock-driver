@@ -1,5 +1,5 @@
 ## Purpose
-Provide RESTful APIs for portfolio management, including holdings CRUD, transaction recording, and cash balance management.
+Provide RESTful APIs for portfolio management, including holdings CRUD, transaction recording, stock search, and cash balance management.
 
 ## Requirements
 
@@ -21,8 +21,12 @@ The system SHALL provide a GET API endpoint `/api/portfolio/holdings` that retur
 The system SHALL provide a POST API endpoint `/api/portfolio/holdings` to add a new stock holding.
 
 #### Scenario: Add new holding
-- **WHEN** client sends POST request to `/api/portfolio/holdings` with code, quantity, cost_price
-- **THEN** system creates a new holding and returns the created record
+- **WHEN** client sends POST request to `/api/portfolio/holdings` with code, quantity (multiple of 100), cost_price
+- **THEN** system validates quantity % 100 === 0, creates a new holding and returns the created record
+
+#### Scenario: Add holding with invalid quantity
+- **WHEN** client sends POST request with quantity that is not a multiple of 100
+- **THEN** system rejects with error message "数量必须是100的整数倍"
 
 ### Requirement: Update portfolio holding API
 The system SHALL provide a PUT API endpoint `/api/portfolio/holdings/<id>` to update an existing holding.
@@ -38,6 +42,17 @@ The system SHALL provide a DELETE API endpoint `/api/portfolio/holdings/<id>` to
 - **WHEN** client sends DELETE request to `/api/portfolio/holdings/<id>`
 - **THEN** system deletes the holding and returns success status
 
+### Requirement: Stock search API
+The system SHALL provide a GET API endpoint `/api/portfolio/search_stocks?q=<keyword>` to search stocks from the StockBasic table.
+
+#### Scenario: Search stocks by keyword
+- **WHEN** client sends GET request to `/api/portfolio/search_stocks?q=600519`
+- **THEN** system queries StockBasic table matching code or name, returns unique results with code and name
+
+#### Scenario: Search with empty query
+- **WHEN** client sends GET request to `/api/portfolio/search_stocks?q=`
+- **THEN** system returns an empty array
+
 ### Requirement: Get transactions API
 The system SHALL provide a GET API endpoint `/api/portfolio/transactions` to retrieve transaction history.
 
@@ -49,12 +64,23 @@ The system SHALL provide a GET API endpoint `/api/portfolio/transactions` to ret
 The system SHALL provide a POST API endpoint `/api/portfolio/transactions` to record a new transaction.
 
 #### Scenario: Add buy transaction
-- **WHEN** client sends POST request to `/api/portfolio/transactions` with type 'buy', code, quantity, price
-- **THEN** system creates the transaction and returns the created record
+- **WHEN** client sends POST request to `/api/portfolio/transactions` with type 'buy', code, quantity (multiple of 100), price
+- **THEN** system validates quantity % 100 === 0, creates the transaction and returns the created record
 
 #### Scenario: Add sell transaction
-- **WHEN** client sends POST request to `/api/portfolio/transactions` with type 'sell', code, quantity, price
-- **THEN** system creates the transaction and returns the created record
+- **WHEN** client sends POST request to `/api/portfolio/transactions` with type 'sell', code, quantity (multiple of 100, ≤ holding quantity), price
+- **THEN** system validates quantity % 100 === 0 and quantity ≤ holding quantity, creates the transaction and updates the holding
+
+#### Scenario: Sell more than held
+- **WHEN** client attempts to sell more shares than currently held
+- **THEN** system rejects with error message
+
+### Requirement: Clear all transactions API
+The system SHALL provide a DELETE API endpoint `/api/portfolio/transactions` to clear all transaction records.
+
+#### Scenario: Clear all transactions
+- **WHEN** client sends DELETE request to `/api/portfolio/transactions`
+- **THEN** system deletes all transaction records and returns success status with deleted count
 
 ### Requirement: Update cash balance API
 The system SHALL provide a POST API endpoint `/api/portfolio/cash` to update the cash balance.
