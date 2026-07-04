@@ -90,7 +90,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { stockAPI } from '../api/stock'
 import * as echarts from 'echarts'
@@ -279,15 +279,24 @@ const renderChart = () => {
   }
 
   chartInstance.setOption(option)
-
-  window.addEventListener('resize', () => {
-    chartInstance && chartInstance.resize()
-  })
+  // 强制重绘适应容器宽度
+  chartInstance.resize()
 }
 
+// resize 监听改用生命周期管理
+let resizeHandler = null
+
 onMounted(async () => {
+  resizeHandler = () => {
+    chartInstance && chartInstance.resize()
+  }
+  window.addEventListener('resize', resizeHandler)
   await loadStockInfo()
   await loadAll()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', resizeHandler)
 })
 
 watch(() => route.params.code, async () => {
@@ -298,8 +307,8 @@ watch(() => route.params.code, async () => {
 
 <style scoped>
 .stock-detail {
-  max-width: 1400px;
-  margin: 0 auto;
+  max-width: 100%;
+  padding: 0 20px;
 }
 
 .stock-info {
@@ -378,6 +387,7 @@ watch(() => route.params.code, async () => {
 }
 
 .chart {
+  width: 100%;
   height: 500px;
 }
 
