@@ -5,6 +5,7 @@ import TopStocks from '../views/TopStocks.vue'
 import Crawler from '../views/Crawler.vue'
 import DataSummary from '../views/DataSummary.vue'
 import Portfolio from '../views/Portfolio.vue'
+import Backtest from '../views/Backtest.vue'
 
 const routes = [
   {
@@ -36,6 +37,11 @@ const routes = [
     path: '/portfolio',
     name: 'Portfolio',
     component: Portfolio
+  },
+  {
+    path: '/backtest',
+    name: 'Backtest',
+    component: Backtest
   }
 ]
 

@@ -78,6 +78,33 @@ export const stockAPI = {
   },
   updateCashBalance(amount) {
     return api.post('/portfolio/cash', { amount })
+  },
+  getBacktestOverview() {
+    return api.get('/backtest/overview')
+  },
+  getBacktestHoldings() {
+    return api.get('/backtest/holdings')
+  },
+  addBacktestHolding(data) {
+    return api.post('/backtest/holdings', data)
+  },
+  updateBacktestHolding(id, data) {
+    return api.put(`/backtest/holdings/${id}`, data)
+  },
+  deleteBacktestHolding(id) {
+    return api.delete(`/backtest/holdings/${id}`)
+  },
+  getBacktestTransactions(limit = 50) {
+    return api.get('/backtest/transactions', { params: { limit } })
+  },
+  addBacktestTransaction(data) {
+    return api.post('/backtest/transactions', data)
+  },
+  clearBacktestTransactions() {
+    return api.delete('/backtest/transactions')
+  },
+  updateBacktestCash(amount) {
+    return api.post('/backtest/cash', { amount })
   }
 }
 

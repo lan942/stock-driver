@@ -73,6 +73,30 @@ def verify_migration(engine) -> None:
             print("✗ cash_balance表不存在")
             return
 
+        # 检查backtest_portfolio表是否存在
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_portfolio';"))
+        if result.fetchone():
+            print("✓ backtest_portfolio表存在")
+        else:
+            print("✗ backtest_portfolio表不存在")
+            return
+
+        # 检查backtest_transactions表是否存在
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_transactions';"))
+        if result.fetchone():
+            print("✓ backtest_transactions表存在")
+        else:
+            print("✗ backtest_transactions表不存在")
+            return
+
+        # 检查backtest_cash表是否存在
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='backtest_cash';"))
+        if result.fetchone():
+            print("✓ backtest_cash表存在")
+        else:
+            print("✗ backtest_cash表不存在")
+            return
+
     print("✓ 迁移验证成功")
 
 
@@ -147,6 +171,53 @@ def add_trade_date_column(engine) -> None:
         """))
         conn.commit()
     print("✓ trade_date列添加完成，已有记录已回填")
+
+
+def create_backtest_tables(engine) -> None:
+    """创建回测相关表"""
+    print("创建回测相关表...")
+    
+    create_portfolio_sql = """
+    CREATE TABLE IF NOT EXISTS backtest_portfolio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code VARCHAR(20) NOT NULL,
+        quantity INTEGER NOT NULL,
+        cost_price FLOAT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(code)
+    );
+    """
+    
+    create_transactions_sql = """
+    CREATE TABLE IF NOT EXISTS backtest_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type VARCHAR(10) NOT NULL,
+        code VARCHAR(20) NOT NULL,
+        quantity INTEGER NOT NULL,
+        price FLOAT NOT NULL,
+        amount FLOAT,
+        trade_date DATE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    
+    create_cash_sql = """
+    CREATE TABLE IF NOT EXISTS backtest_cash (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        balance FLOAT NOT NULL DEFAULT 0.0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    
+    with engine.connect() as conn:
+        conn.execute(text(create_portfolio_sql))
+        conn.execute(text(create_transactions_sql))
+        conn.execute(text(create_cash_sql))
+        conn.commit()
+    print("✓ backtest_portfolio 表创建完成")
+    print("✓ backtest_transactions 表创建完成")
+    print("✓ backtest_cash 表创建完成")
 
 
 def add_stock_daily_columns(engine) -> None:
@@ -253,6 +324,9 @@ def migrate() -> None:
 
     # 步骤7: 验证迁移
     verify_migration(engine)
+
+    # 步骤8: 创建回测相关表
+    create_backtest_tables(engine)
 
     print("\n" + "=" * 50)
     print("迁移完成")

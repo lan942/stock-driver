@@ -32,6 +32,17 @@ from backend.services.portfolio_service import (
     clear_all_transactions,
     update_cash_balance,
 )
+from backend.services.backtest_service import (
+    get_portfolio_overview as backtest_get_overview,
+    get_holdings as backtest_get_holdings,
+    add_holding as backtest_add_holding,
+    update_holding as backtest_update_holding,
+    delete_holding as backtest_delete_holding,
+    get_transactions as backtest_get_transactions,
+    add_transaction as backtest_add_transaction,
+    clear_all_transactions as backtest_clear_transactions,
+    update_cash as backtest_update_cash,
+)
 
 api = Blueprint('api', __name__)
 
@@ -734,4 +745,95 @@ def portfolio_update_cash():
         return jsonify({'error': '缺少必要参数: amount'}), 400
 
     result = update_cash_balance(amount)
+    return jsonify(result)
+
+
+@api.route('/backtest/overview', methods=['GET'])
+def backtest_overview():
+    overview = backtest_get_overview()
+    return jsonify(overview)
+
+
+@api.route('/backtest/holdings', methods=['GET'])
+def backtest_holdings():
+    holdings = backtest_get_holdings()
+    return jsonify(holdings)
+
+
+@api.route('/backtest/holdings', methods=['POST'])
+def backtest_add_holding_route():
+    data = request.get_json(silent=True) or {}
+    code = data.get('code')
+    quantity = data.get('quantity')
+    cost_price = data.get('cost_price')
+
+    if not code or quantity is None or cost_price is None:
+        return jsonify({'error': '缺少必要参数: code, quantity, cost_price'}), 400
+
+    result = backtest_add_holding(code, quantity, cost_price)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@api.route('/backtest/holdings/<int:holding_id>', methods=['PUT'])
+def backtest_update_holding_route(holding_id):
+    data = request.get_json(silent=True) or {}
+    quantity = data.get('quantity')
+    cost_price = data.get('cost_price')
+
+    result = backtest_update_holding(holding_id, quantity, cost_price)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@api.route('/backtest/holdings/<int:holding_id>', methods=['DELETE'])
+def backtest_delete_holding_route(holding_id):
+    result = backtest_delete_holding(holding_id)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@api.route('/backtest/transactions', methods=['GET'])
+def backtest_transactions():
+    limit = request.args.get('limit', 50, type=int)
+    transactions = backtest_get_transactions(limit)
+    return jsonify(transactions)
+
+
+@api.route('/backtest/transactions', methods=['POST'])
+def backtest_add_transaction_route():
+    data = request.get_json(silent=True) or {}
+    tx_type = data.get('type')
+    code = data.get('code')
+    quantity = data.get('quantity')
+    price = data.get('price')
+    trade_date = data.get('trade_date')
+
+    if not tx_type or not code or quantity is None or price is None:
+        return jsonify({'error': '缺少必要参数: type, code, quantity, price'}), 400
+
+    result = backtest_add_transaction(tx_type, code, quantity, price, trade_date)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@api.route('/backtest/transactions', methods=['DELETE'])
+def backtest_clear_transactions():
+    result = backtest_clear_transactions()
+    return jsonify(result)
+
+
+@api.route('/backtest/cash', methods=['POST'])
+def backtest_update_cash_route():
+    data = request.get_json(silent=True) or {}
+    amount = data.get('amount')
+
+    if amount is None:
+        return jsonify({'error': '缺少必要参数: amount'}), 400
+
+    result = backtest_update_cash(amount)
     return jsonify(result)

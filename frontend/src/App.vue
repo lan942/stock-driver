@@ -9,6 +9,7 @@
         <router-link to="/top" class="nav-link">涨跌排行</router-link>
         <router-link to="/data-summary" class="nav-link">数据概览</router-link>
         <router-link to="/portfolio" class="nav-link">持仓管理</router-link>
+        <router-link to="/backtest" class="nav-link">回测管理</router-link>
         <router-link to="/crawler" class="nav-link">数据爬取</router-link>
       </nav>
     </header>
