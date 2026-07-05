@@ -58,6 +58,17 @@ def get_holdings() -> List[Dict[str, Any]]:
     holdings = db.query(Portfolio).all()
     latest_prices = _get_latest_prices(db)
 
+    # 查询当天买入数量（T+1 规则）
+    today = date.today()
+    today_buy_rows = db.query(
+        Transaction.code,
+        func.sum(Transaction.quantity)
+    ).filter(
+        Transaction.type == 'buy',
+        Transaction.trade_date == today
+    ).group_by(Transaction.code).all()
+    today_buy_quantities = {code: qty or 0 for code, qty in today_buy_rows}
+
     result = []
     for holding in holdings:
         stock = db.query(Stock).filter(Stock.code == holding.code).first()
@@ -76,11 +87,15 @@ def get_holdings() -> List[Dict[str, Any]]:
             profit = 0.0
             profit_rate = 0.0
 
+        today_buy = today_buy_quantities.get(holding.code, 0)
+        available_quantity = holding.quantity - today_buy
+
         result.append({
             'id': holding.id,
             'code': holding.code,
             'name': stock_name,
             'quantity': holding.quantity,
+            'available_quantity': available_quantity,
             'cost_price': round(holding.cost_price, 2),
             'current_price': round(current_price, 2),
             'market_value': round(market_value, 2),

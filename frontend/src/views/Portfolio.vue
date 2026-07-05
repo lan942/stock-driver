@@ -52,6 +52,13 @@
             {{ row.quantity.toLocaleString() }} 股
           </template>
         </el-table-column>
+        <el-table-column prop="available_quantity" label="可用数量" width="100" align="center">
+          <template #default="{ row }">
+            <span :class="{ 't-plus-one': row.available_quantity < row.quantity }">
+              {{ row.available_quantity.toLocaleString() }} 股
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column prop="cost_price" label="成本价" width="100" align="center">
           <template #default="{ row }">
             ¥{{ row.cost_price.toFixed(2) }}
@@ -657,6 +664,11 @@ onMounted(() => {
 
 .profit-negative {
   color: #ef4444;
+}
+
+.t-plus-one {
+  color: #e6a23c;
+  font-weight: 500;
 }
 
 .profit-rate {

@@ -4,7 +4,7 @@ Manage portfolio data including stock holdings, transactions, and cash balance w
 ## Requirements
 
 ### Requirement: Portfolio model tracks stock holdings
-The system SHALL maintain a Portfolio model that tracks user's stock holdings, including stock code, quantity, and average cost price.
+The system SHALL maintain a Portfolio model that tracks user's stock holdings, including stock code, quantity, average cost price, and available quantity (T+1 rule).
 
 #### Scenario: Create new portfolio entry
 - **WHEN** user adds a new stock holding with code, quantity (must be multiple of 100), and cost price
@@ -17,6 +17,10 @@ The system SHALL maintain a Portfolio model that tracks user's stock holdings, i
 #### Scenario: Delete portfolio entry
 - **WHEN** user removes a portfolio entry
 - **THEN** system deletes the corresponding Portfolio record
+
+#### Scenario: Get holdings with available quantity
+- **WHEN** system retrieves portfolio holdings
+- **THEN** system returns available_quantity = total_quantity - today_buy_quantity for each holding, where today_buy_quantity is the sum of buy transactions with trade_date = today
 
 ### Requirement: Transaction model tracks buy/sell operations
 The system SHALL maintain a Transaction model that records all stock buy and sell operations, including transaction type, stock code, quantity, price, and timestamp.
