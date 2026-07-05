@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, UniqueConstraint
 from sqlalchemy.sql import func
 from backend.utils.db import Base
 
@@ -32,6 +32,7 @@ class Transaction(Base):
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=False)
     amount = Column(Float)
+    trade_date = Column(Date, default=func.current_date())
     created_at = Column(DateTime, server_default=func.now())
 
 

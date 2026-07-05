@@ -708,11 +708,12 @@ def portfolio_add_transaction():
     code = data.get('code')
     quantity = data.get('quantity')
     price = data.get('price')
+    trade_date = data.get('trade_date')
 
     if not tx_type or not code or quantity is None or price is None:
         return jsonify({'error': '缺少必要参数: type, code, quantity, price'}), 400
 
-    result = add_transaction(tx_type, code, quantity, price)
+    result = add_transaction(tx_type, code, quantity, price, trade_date)
     if 'error' in result:
         return jsonify(result), 400
     return jsonify(result), 201

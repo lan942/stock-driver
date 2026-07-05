@@ -125,6 +125,30 @@ def create_portfolio_tables(engine) -> None:
     print("✓ cash_balance表创建完成")
 
 
+def add_trade_date_column(engine) -> None:
+    """为transactions表添加trade_date列"""
+    print("为transactions表添加trade_date列...")
+    with engine.connect() as conn:
+        # 检查列是否已存在
+        result = conn.execute(text("PRAGMA table_info(transactions);"))
+        columns = [row[1] for row in result.fetchall()]
+        if 'trade_date' in columns:
+            print("✓ trade_date列已存在，跳过")
+            return
+
+        conn.execute(text("ALTER TABLE transactions ADD COLUMN trade_date DATE;"))
+        conn.commit()
+
+        # 回填已有数据：将created_at的日期部分设为trade_date
+        conn.execute(text("""
+            UPDATE transactions 
+            SET trade_date = date(created_at) 
+            WHERE trade_date IS NULL;
+        """))
+        conn.commit()
+    print("✓ trade_date列添加完成，已有记录已回填")
+
+
 def add_stock_daily_unique_constraint(engine) -> None:
     """为stock_daily表添加(code, date)唯一约束"""
     print("为stock_daily表添加(code, date)唯一约束...")
@@ -199,7 +223,10 @@ def migrate() -> None:
     # 步骤4: 为stock_daily表添加唯一约束
     add_stock_daily_unique_constraint(engine)
 
-    # 步骤5: 验证迁移
+    # 步骤5: 为transactions表添加trade_date列
+    add_trade_date_column(engine)
+
+    # 步骤6: 验证迁移
     verify_migration(engine)
 
     print("\n" + "=" * 50)

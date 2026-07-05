@@ -1,6 +1,6 @@
 """持仓管理服务：处理持仓、交易记录和现金余额的业务逻辑"""
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import func
@@ -218,6 +218,7 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
             'quantity': tx.quantity,
             'price': round(tx.price, 2),
             'amount': round(tx.amount, 2) if tx.amount else round(tx.quantity * tx.price, 2),
+            'trade_date': tx.trade_date.strftime('%Y-%m-%d') if tx.trade_date else '',
             'created_at': tx.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
 
@@ -225,7 +226,7 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
     return result
 
 
-def add_transaction(tx_type: str, code: str, quantity: int, price: float) -> Dict[str, Any]:
+def add_transaction(tx_type: str, code: str, quantity: int, price: float, trade_date: Optional[str] = None) -> Dict[str, Any]:
     """添加交易记录"""
     # 验证数量必须是100的整数倍
     if quantity % 100 != 0:
@@ -254,27 +255,52 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float) -> Dic
             db.close()
             return {'error': f'卖出数量不能超过持仓数量 ({holding.quantity} 股)'}
 
-    amount = quantity * price
-    transaction = Transaction(
-        type=tx_type,
-        code=code,
-        quantity=quantity,
-        price=price,
-        amount=amount
-    )
-    db.add(transaction)
-    db.commit()
-    db.refresh(transaction)
+    # 处理交易日期
+    if trade_date:
+        try:
+            parsed_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
+        except ValueError:
+            db.close()
+            return {'error': '交易日期格式无效，应为 YYYY-MM-DD'}
+    else:
+        parsed_date = date.today()
 
-    # 如果是卖出，更新持仓数量
-    if tx_type == 'sell':
-        holding = db.query(Portfolio).filter(Portfolio.code == code).first()
+    amount = quantity * price
+
+    # 更新持仓
+    holding = db.query(Portfolio).filter(Portfolio.code == code).first()
+    if tx_type == 'buy':
+        if holding:
+            # 已有持仓：加权平均成本价
+            total_cost = holding.quantity * holding.cost_price + quantity * price
+            holding.quantity += quantity
+            holding.cost_price = total_cost / holding.quantity
+        else:
+            # 新建持仓
+            holding = Portfolio(
+                code=code,
+                quantity=quantity,
+                cost_price=price
+            )
+            db.add(holding)
+    elif tx_type == 'sell':
         if holding:
             holding.quantity -= quantity
             # 如果持仓数量为0，删除该持仓
             if holding.quantity == 0:
                 db.delete(holding)
-            db.commit()
+
+    transaction = Transaction(
+        type=tx_type,
+        code=code,
+        quantity=quantity,
+        price=price,
+        amount=amount,
+        trade_date=parsed_date
+    )
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
 
     db.close()
 
@@ -286,6 +312,7 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float) -> Dic
         'quantity': transaction.quantity,
         'price': round(transaction.price, 2),
         'amount': round(transaction.amount, 2),
+        'trade_date': transaction.trade_date.strftime('%Y-%m-%d') if transaction.trade_date else '',
         'created_at': transaction.created_at.strftime('%Y-%m-%d %H:%M:%S')
     }
 

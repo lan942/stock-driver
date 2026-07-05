@@ -132,7 +132,12 @@
             ¥{{ formatNumber(row.amount) }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="交易时间" width="170" />
+        <el-table-column prop="trade_date" label="交易日期" width="110">
+          <template #default="{ row }">
+            {{ row.trade_date || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="170" />
       </el-table>
       <div v-if="transactions.length === 0" class="empty-state">
         <div class="empty-icon">📝</div>
@@ -253,6 +258,16 @@
         <el-form-item label="成交价格" required>
           <el-input-number v-model="addTransactionForm.price" :min="0.01" :step="0.01" :precision="2" placeholder="请输入成交价格" />
         </el-form-item>
+        <el-form-item label="交易日期">
+          <el-date-picker
+            v-model="addTransactionForm.trade_date"
+            type="date"
+            placeholder="选择交易日期"
+            value-format="YYYY-MM-DD"
+            :disabled-date="disableFutureDate"
+            style="width: 100%"
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="addTransactionDialogVisible = false">取消</el-button>
@@ -311,11 +326,19 @@ const editHoldingForm = reactive({
 })
 
 const addTransactionDialogVisible = ref(false)
+const getTodayStr = () => {
+  const d = new Date()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
+}
+
 const addTransactionForm = reactive({
   type: 'buy',
   code: '',
   quantity: null,
-  price: null
+  price: null,
+  trade_date: getTodayStr()
 })
 
 const cashDialogVisible = ref(false)
@@ -326,6 +349,10 @@ const cashForm = reactive({
 const formatNumber = (num) => {
   if (num === null || num === undefined) return '0.00'
   return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const disableFutureDate = (time) => {
+  return time.getTime() > Date.now()
 }
 
 const loadOverview = async () => {
@@ -495,6 +522,7 @@ const openAddTransactionDialog = () => {
   addTransactionForm.code = ''
   addTransactionForm.quantity = null
   addTransactionForm.price = null
+  addTransactionForm.trade_date = getTodayStr()
   addTransactionDialogVisible.value = true
 }
 
@@ -516,7 +544,8 @@ const submitAddTransaction = async () => {
       type: addTransactionForm.type,
       code: addTransactionForm.code,
       quantity: addTransactionForm.quantity,
-      price: addTransactionForm.price
+      price: addTransactionForm.price,
+      trade_date: addTransactionForm.trade_date
     })
     ElMessage.success('交易记录添加成功')
     addTransactionDialogVisible.value = false
