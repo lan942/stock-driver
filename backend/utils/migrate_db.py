@@ -149,6 +149,28 @@ def add_trade_date_column(engine) -> None:
     print("✓ trade_date列添加完成，已有记录已回填")
 
 
+def add_stock_daily_columns(engine) -> None:
+    """为stock_daily表添加pe/pb/market_cap列（如果缺失）"""
+    print("为stock_daily表添加pe/pb/market_cap列...")
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info('stock_daily')"))
+        existing_cols = {row[1] for row in result.fetchall()}
+        for col_name, col_type in [
+            ('pe', 'FLOAT'),
+            ('pb', 'FLOAT'),
+            ('market_cap', 'FLOAT'),
+        ]:
+            if col_name not in existing_cols:
+                conn.execute(text(
+                    f"ALTER TABLE stock_daily ADD COLUMN {col_name} {col_type}"
+                ))
+                conn.commit()
+                print(f"  ✓ Added column {col_name} to stock_daily")
+            else:
+                print(f"  - {col_name}列已存在，跳过")
+    print("✓ stock_daily列检查完成")
+
+
 def add_stock_daily_unique_constraint(engine) -> None:
     """为stock_daily表添加(code, date)唯一约束"""
     print("为stock_daily表添加(code, date)唯一约束...")
@@ -220,13 +242,16 @@ def migrate() -> None:
     # 步骤3: 创建持仓相关的表
     create_portfolio_tables(engine)
 
-    # 步骤4: 为stock_daily表添加唯一约束
+    # 步骤4: 为stock_daily表添加pe/pb/market_cap列
+    add_stock_daily_columns(engine)
+
+    # 步骤5: 为stock_daily表添加唯一约束
     add_stock_daily_unique_constraint(engine)
 
-    # 步骤5: 为transactions表添加trade_date列
+    # 步骤6: 为transactions表添加trade_date列
     add_trade_date_column(engine)
 
-    # 步骤6: 验证迁移
+    # 步骤7: 验证迁移
     verify_migration(engine)
 
     print("\n" + "=" * 50)

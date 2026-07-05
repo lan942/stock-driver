@@ -46,7 +46,7 @@ CrawlStatus模型 SHALL 包含以下字段：
 - **WHEN** 创建CrawlStatus记录
 - **THEN** crawl_type SHALL 为'list'、'realtime'或'daily'
 - **AND** status SHALL 为'success'、'partial'或'failed'
-- **AND** crawl_time SHALL 记录爬取开始时间（不是结束时间）
+- **AND** crawl_time SHALL 记录爬取完成时间（调用record_crawl_status时的时间戳）
 
 ### Requirement: Query crawl status history
 

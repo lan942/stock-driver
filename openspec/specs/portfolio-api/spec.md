@@ -15,7 +15,7 @@ The system SHALL provide a GET API endpoint `/api/portfolio/holdings` that retur
 
 #### Scenario: Retrieve all holdings
 - **WHEN** client sends GET request to `/api/portfolio/holdings`
-- **THEN** system returns JSON array of holdings with code, name, quantity, cost_price, current_price, market_value, profit, and profit_rate
+- **THEN** system returns JSON array of holdings with code, name, quantity, available_quantity, cost_price, current_price, market_value, profit, and profit_rate
 
 ### Requirement: Add portfolio holding API
 The system SHALL provide a POST API endpoint `/api/portfolio/holdings` to add a new stock holding.

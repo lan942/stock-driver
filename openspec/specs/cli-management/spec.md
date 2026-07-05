@@ -11,8 +11,9 @@ Provide command-line interface for managing stock-driver service lifecycle, craw
 
 #### Scenario: 启动后端服务
 - **WHEN** 用户执行 `python manage.py start`
-- **THEN** 脚本 SHALL 在后台启动 Flask 应用（端口5000）
-- **AND** 输出启动日志和服务地址
+- **THEN** 脚本 SHALL 在前台启动 Flask 应用（端口5000），按 Ctrl+C 停止
+- **AND** 支持 `--frontend` 参数同时启动前端开发服务器（端口3000）
+- **AND** 输出服务地址信息
 - **AND** 支持 `--debug` 参数启用调试模式
 
 #### Scenario: 停止后端服务

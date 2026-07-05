@@ -32,27 +32,11 @@ def create_app():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    _migrate_db(engine)
-
-
-def _migrate_db(db_engine):
-    """迁移数据库：添加缺失的列"""
     try:
-        from sqlalchemy import text
-        with db_engine.connect() as conn:
-            result = conn.execute(text("PRAGMA table_info('stock_daily')"))
-            existing_cols = {row[1] for row in result.fetchall()}
-            for col_name, col_type in [
-                ('pe', 'FLOAT'),
-                ('pb', 'FLOAT'),
-                ('market_cap', 'FLOAT'),
-            ]:
-                if col_name not in existing_cols:
-                    conn.execute(text(
-                        f"ALTER TABLE stock_daily ADD COLUMN {col_name} {col_type}"
-                    ))
-                    conn.commit()
-                    print(f"[migrate] Added column {col_name} to stock_daily")
+        from backend.utils.migrate_db import add_stock_daily_columns, add_stock_daily_unique_constraint, add_trade_date_column
+        add_stock_daily_columns(engine)
+        add_stock_daily_unique_constraint(engine)
+        add_trade_date_column(engine)
     except Exception as e:
         print(f"[migrate] Migration note: {e}")
 

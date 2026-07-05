@@ -37,12 +37,12 @@ The system SHALL maintain a Transaction model that records all stock buy and sel
 - **WHEN** user attempts to sell more shares than held
 - **THEN** system rejects the transaction with an error message
 
-### Requirement: Stock search from StockBasic table
-The system SHALL search stocks from the StockBasic table (stock metadata) rather than the StockDaily table (daily price data).
+### Requirement: Stock search from Stock table
+The system SHALL search stocks from the Stock table (stock metadata) rather than the StockDaily table (daily price data).
 
 #### Scenario: Search stocks by keyword
 - **WHEN** user types a search query
-- **THEN** system queries StockBasic table matching code or name, returns unique results
+- **THEN** system queries Stock table matching code or name, returns unique results
 
 ### Requirement: Clear all transactions
 The system SHALL support clearing all transaction records at once.

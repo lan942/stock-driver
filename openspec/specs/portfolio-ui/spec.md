@@ -18,11 +18,11 @@ The portfolio page SHALL display an overview section with cards showing total po
 - **THEN** system shows cards with total_value, cash_balance, total_profit, total_profit_rate
 
 ### Requirement: Holdings table with detailed information
-The portfolio page SHALL display a table showing all stock holdings with columns for stock code, name, quantity, cost price, current price, market value, profit, and profit rate. Columns SHALL have different widths to fit content and fill the parent container.
+The portfolio page SHALL display a table showing all stock holdings with columns for stock code, name, quantity, available quantity, cost price, current price, market value, profit, and profit rate. Columns SHALL have different widths to fit content and fill the parent container.
 
 #### Scenario: Display holdings table
 - **WHEN** user visits the portfolio page
-- **THEN** system shows a table with all holdings and their details
+- **THEN** system shows a table with all holdings and their details, including available_quantity column that visually indicates T+1 restriction (orange highlight when available < holding quantity)
 
 ### Requirement: Stock code search with autocomplete
 The stock code field in the add holding dialog SHALL support autocomplete search with debounce.
