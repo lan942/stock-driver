@@ -12,8 +12,10 @@
         <div class="card-icon cash-icon">💵</div>
         <div class="card-content">
           <div class="card-label">现金余额</div>
-          <div class="card-value">¥{{ formatNumber(overview.cash_balance) }}</div>
-          <el-button size="small" type="text" @click="openCashDialog" class="update-btn">更新</el-button>
+          <div class="card-value-row">
+            <div class="card-value">¥{{ formatNumber(overview.cash_balance) }}</div>
+            <el-button size="small" type="text" @click="openCashDialog" class="update-btn">更新</el-button>
+          </div>
         </div>
       </el-card>
       <el-card class="overview-card">
@@ -650,10 +652,14 @@ onMounted(() => {
   color: #303133;
 }
 
+.card-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .update-btn {
-  position: absolute;
-  right: 0;
-  top: 0;
+  flex-shrink: 0;
   padding: 0;
   font-size: 12px;
 }
