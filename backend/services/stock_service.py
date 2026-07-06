@@ -124,6 +124,29 @@ def record_crawl_status(
         logger.error(f"记录爬取状态失败: {e}")
 
 
+def _resolve_prev_close(
+    db, code: str, current_date: date, in_batch_prev_close: Optional[float]
+) -> Optional[float]:
+    """获取上一交易日 close：优先用同批次内前一日，否则查数据库。"""
+    if in_batch_prev_close is not None:
+        return in_batch_prev_close
+    prev = db.query(StockDaily.close).filter(
+        StockDaily.code == code,
+        StockDaily.date < current_date,
+        StockDaily.close.isnot(None),
+    ).order_by(StockDaily.date.desc()).limit(1).first()
+    return prev[0] if prev else None
+
+
+def _compute_change_percent(
+    prev_close: Optional[float], curr_close: Optional[float]
+) -> Optional[float]:
+    """计算涨跌幅百分比；prev_close 为 0/None 或 curr_close 为 None 时返回 None。"""
+    if not prev_close or prev_close == 0 or curr_close is None:
+        return None
+    return round((curr_close - prev_close) / prev_close * 100, 4)
+
+
 def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
     """
     批量保存多只股票的日线数据，返回(成功数, 失败数, 新增数, 更新数)
@@ -133,6 +156,11 @@ def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
 
     Returns:
         (成功股票数, 失败股票数, 新增记录数, 更新记录数)
+
+    Note:
+        腾讯 stock_zh_a_daily 接口不返回涨跌幅，normalizer 在 df 内有前一日 close
+        时才计算。单日补爬或 df 首行的 change_percent 会缺失，这里在写入前用
+        同批次前一日 close 或数据库上一交易日 close 补全。
     """
     if not df_list:
         return 0, 0, 0, 0
@@ -154,11 +182,25 @@ def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
                 fail_stocks += 1
                 continue
 
+            # 按日期升序，保证同批次内多日数据能把 prev_close 传给次日
+            df_sorted = df.sort_values('date').reset_index(drop=True)
+
             stock_added = 0
             stock_updated = 0
+            in_batch_prev_close: Optional[float] = None
 
-            for _, row in df.iterrows():
+            for _, row in df_sorted.iterrows():
                 date_val = row['date']
+                close_val = row.get('close')
+                change_percent_val = row.get('change_percent')
+
+                # change_percent 缺失且 close 可用 → 从同批次或 DB 上一交易日 close 补全
+                if change_percent_val is None and close_val is not None:
+                    prev_close = _resolve_prev_close(
+                        db, code, date_val, in_batch_prev_close
+                    )
+                    change_percent_val = _compute_change_percent(prev_close, close_val)
+
                 existing = db.query(StockDaily).filter(
                     StockDaily.code == code, StockDaily.date == date_val
                 ).first()
@@ -167,7 +209,8 @@ def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
                     for field in ('open', 'high', 'low', 'close', 'volume', 'turnover',
                                   'turnover_rate', 'change_percent',
                                   'pe', 'pb', 'market_cap'):
-                        val = row.get(field)
+                        # change_percent 用上面补全后的值，其余字段直接取 row
+                        val = change_percent_val if field == 'change_percent' else row.get(field)
                         if val is not None:
                             setattr(existing, field, val)
                     stock_updated += 1
@@ -178,17 +221,21 @@ def save_daily_batch(df_list: list[pd.DataFrame]) -> Tuple[int, int, int, int]:
                         open=row.get('open'),
                         high=row.get('high'),
                         low=row.get('low'),
-                        close=row.get('close'),
+                        close=close_val,
                         volume=row.get('volume'),
                         turnover=row.get('turnover'),
                         turnover_rate=row.get('turnover_rate'),
-                        change_percent=row.get('change_percent'),
+                        change_percent=change_percent_val,
                         pe=row.get('pe'),
                         pb=row.get('pb'),
                         market_cap=row.get('market_cap'),
                     )
                     db.add(daily)
                     stock_added += 1
+
+                # 同批次下一日优先用这个 close，避免再去查 DB
+                if close_val is not None:
+                    in_batch_prev_close = close_val
 
             success_stocks += 1
             added_count += stock_added
