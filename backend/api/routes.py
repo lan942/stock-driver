@@ -43,6 +43,10 @@ from backend.services.backtest_service import (
     clear_all_transactions as backtest_clear_transactions,
     update_cash as backtest_update_cash,
 )
+from backend.services.strategy_config import StrategyConfigService
+from backend.services.position_manager import PositionManager
+from backend.services.strategy_engine import StrategyEngine
+from backend.services.strategy_backtest import StrategyBacktest
 
 api = Blueprint('api', __name__)
 
@@ -837,3 +841,200 @@ def backtest_update_cash_route():
 
     result = backtest_update_cash(amount)
     return jsonify(result)
+
+
+# ─── 策略 API ───────────────────────────────────────────
+
+@api.route('/strategy/config', methods=['GET'])
+def strategy_get_config():
+    """获取策略全部配置"""
+    configs = StrategyConfigService.get_all()
+    expected = StrategyConfigService.get_expected_return()
+    return jsonify({'config': configs, 'expected_return': expected})
+
+
+@api.route('/strategy/config', methods=['PUT'])
+def strategy_update_config():
+    """批量更新策略配置"""
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return jsonify({'error': '请求体为空'}), 400
+
+    for key, value in data.items():
+        StrategyConfigService.set(key, value)
+
+    return jsonify({'message': '配置更新成功', 'updated': list(data.keys())})
+
+
+@api.route('/strategy/recommendations', methods=['GET'])
+def strategy_recommendations():
+    """获取每日买入推荐"""
+    available_slots = PositionManager.get_available_slots()
+    available_cash = PositionManager.get_available_cash()
+
+    if available_slots <= 0:
+        return jsonify({'data': [], 'available_slots': 0, 'message': '持仓已满'})
+
+    recommendations = StrategyEngine.generate_recommendations(available_slots, available_cash)
+    return jsonify({
+        'data': recommendations,
+        'available_slots': available_slots,
+        'available_cash': available_cash,
+    })
+
+
+@api.route('/strategy/positions', methods=['GET'])
+def strategy_positions():
+    """获取持仓列表"""
+    status = request.args.get('status', None)
+    positions = PositionManager.get_positions(status)
+    return jsonify({'data': positions})
+
+
+@api.route('/strategy/transactions', methods=['GET'])
+def strategy_transactions():
+    """分页获取交易记录"""
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 20, type=int)
+    code = request.args.get('code', None)
+    result = PositionManager.get_transactions(code=code, page=page, page_size=page_size)
+    return jsonify(result)
+
+
+@api.route('/strategy/stats', methods=['GET'])
+def strategy_stats():
+    """获取策略绩效统计"""
+    stats = PositionManager.get_stats()
+    return jsonify(stats)
+
+
+@api.route('/strategy/run', methods=['POST'])
+def strategy_run():
+    """手动触发策略执行"""
+    today = date.today()
+    data = request.get_json(silent=True) or {}
+    run_date_str = data.get('date')
+    if run_date_str:
+        today = datetime.strptime(run_date_str, '%Y-%m-%d').date()
+
+    # 1. 检测卖出条件
+    sell_result = PositionManager.check_sell_conditions(today)
+
+    # 2. 计算可用仓位
+    available_slots = PositionManager.get_available_slots()
+    available_cash = PositionManager.get_available_cash()
+
+    # 3. 生成推荐
+    recommendations = []
+    if available_slots > 0:
+        recommendations = StrategyEngine.generate_recommendations(available_slots, available_cash)
+
+    return jsonify({
+        'sold_count': len(sell_result['sold']),
+        'sold_details': sell_result['sold'],
+        'remaining_holding': sell_result['remaining_holding'],
+        'available_slots': available_slots,
+        'available_cash': available_cash,
+        'recommendations_count': len(recommendations),
+        'recommendations': recommendations,
+        'run_date': today.strftime('%Y-%m-%d'),
+    })
+
+
+@api.route('/strategy/execute', methods=['POST'])
+def strategy_execute():
+    """执行买入推荐：同步写入 portfolio 和 strategy 两套系统"""
+    data = request.get_json(silent=True) or {}
+    code = data.get('code')
+    name = data.get('name', '')
+    quantity = data.get('quantity')
+    buy_price = data.get('buy_price')
+    suggested_buy_price = data.get('suggested_buy_price', buy_price)
+    target_price = data.get('target_price')
+    stop_price = data.get('stop_price')
+    buy_date_str = data.get('buy_date')
+
+    if not code or not quantity or not buy_price or not target_price or not stop_price:
+        return jsonify({'error': '缺少必要参数: code, quantity, buy_price, target_price, stop_price'}), 400
+
+    if buy_date_str:
+        buy_date = datetime.strptime(buy_date_str, '%Y-%m-%d').date()
+    else:
+        buy_date = date.today()
+
+    result = PositionManager.execute_recommendation(
+        code=code,
+        name=name,
+        quantity=quantity,
+        buy_price=buy_price,
+        suggested_buy_price=suggested_buy_price,
+        target_price=target_price,
+        stop_price=stop_price,
+        buy_date=buy_date,
+    )
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@api.route('/strategy/sell', methods=['POST'])
+def strategy_sell():
+    """手动卖出策略持仓：同步到 portfolio 系统"""
+    data = request.get_json(silent=True) or {}
+    position_id = data.get('position_id')
+    sell_price = data.get('sell_price')
+
+    if not position_id or not sell_price:
+        return jsonify({'error': '缺少必要参数: position_id, sell_price'}), 400
+
+    sell_date_str = data.get('sell_date')
+    if sell_date_str:
+        sell_date = datetime.strptime(sell_date_str, '%Y-%m-%d').date()
+    else:
+        sell_date = date.today()
+
+    result = PositionManager.close_position(position_id, sell_price, sell_date)
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@api.route('/strategy/backtest', methods=['POST'])
+def strategy_backtest():
+    """回测：在指定日期范围内按日迭代模拟策略"""
+    data = request.get_json(silent=True) or {}
+    start_date_str = data.get('start_date')
+    end_date_str = data.get('end_date')
+
+    if not start_date_str or not end_date_str:
+        return jsonify({'error': '缺少必要参数: start_date, end_date'}), 400
+
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
+
+    backtest = StrategyBacktest(
+        start_date=start_date,
+        end_date=end_date,
+        initial_capital=data.get('initial_capital'),
+        max_positions=data.get('max_positions'),
+        stop_profit_pct=data.get('stop_profit_pct'),
+        stop_loss_pct=data.get('stop_loss_pct'),
+        max_hold_days=data.get('max_hold_days'),
+        position_ratio=data.get('position_ratio'),
+    )
+
+    result = backtest.run()
+    if 'error' in result:
+        return jsonify(result), 400
+
+    return jsonify(result)
+
+
+@api.route('/strategy/backtest/clear', methods=['POST'])
+def strategy_backtest_clear():
+    """清空回测数据"""
+    result = StrategyBacktest.clear_all()
+    return jsonify({'message': '回测数据已清除', **result})
