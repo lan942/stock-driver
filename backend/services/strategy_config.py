@@ -76,6 +76,20 @@ class StrategyConfigService:
         else:
             db.add(StrategyConfig(key=key, value=value))
         db.commit()
+
+        # 同步 initial_capital 到 StrategyCash 表
+        if key == 'initial_capital':
+            from backend.models.strategy import StrategyCash
+            cash = db.query(StrategyCash).first()
+            init_val = float(value)
+            if cash:
+                diff = init_val - cash.initial_capital
+                cash.initial_capital = init_val
+                cash.balance = round(cash.balance + diff, 2)
+            else:
+                db.add(StrategyCash(balance=init_val, initial_capital=init_val))
+            db.commit()
+
         db.close()
 
     @staticmethod

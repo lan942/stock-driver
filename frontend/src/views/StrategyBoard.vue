@@ -52,6 +52,9 @@
           <el-input-number v-model="config.target_annual_return" :min="0" :max="1" :step="0.01" :precision="2" size="small" />
           <span class="unit">(如 0.15 = 15%)</span>
         </el-form-item>
+        <el-form-item label="初始资金（元）">
+          <el-input-number v-model="config.initial_capital" :min="10000" :max="99999999" :step="10000" size="small" />
+        </el-form-item>
         <el-form-item label="最大持仓只数">
           <el-input-number v-model="config.max_positions" :min="1" :max="20" :step="1" size="small" />
         </el-form-item>
@@ -83,7 +86,7 @@
 
     <!-- 操作按钮 -->
     <div class="action-bar">
-      <el-button type="success" @click="runStrategy" :loading="running">
+      <el-button type="success" @click="handleRun" :loading="running">
         运行策略
       </el-button>
       <el-tag v-if="runResult" type="success" style="margin-left: 12px">
@@ -326,6 +329,7 @@ import {
 
 const config = reactive({
   target_annual_return: 0.15,
+  initial_capital: 100000,
   max_positions: 5,
   position_ratio: 0.2,
   stop_profit_pct: 0.06,
@@ -385,6 +389,8 @@ async function saveConfig() {
   savingConfig.value = true
   try {
     await updateStrategyConfig({ ...config })
+    // 重新加载统计数据和预期收益（初始资金变更后同步刷新）
+    await Promise.all([loadStats(), loadConfig()])
     ElMessage.success('配置保存成功')
   } catch (e) {
     ElMessage.error('保存失败')
@@ -496,6 +502,12 @@ async function runBacktestHandler() {
     const res = await runBacktest({
       start_date: backtestDates.value[0],
       end_date: backtestDates.value[1],
+      initial_capital: config.initial_capital,
+      max_positions: config.max_positions,
+      stop_profit_pct: config.stop_profit_pct,
+      stop_loss_pct: config.stop_loss_pct,
+      max_hold_days: config.max_hold_days,
+      position_ratio: config.position_ratio,
     })
     backtestResult.value = res.data
     // 绘制权益曲线

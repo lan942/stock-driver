@@ -28,13 +28,19 @@ class PositionManager:
 
     @staticmethod
     def _get_cash() -> StrategyCash:
-        """获取或创建现金记录"""
+        """获取或创建现金记录，自动同步配置中的 initial_capital"""
         db = next(get_db())
         cash = db.query(StrategyCash).first()
+        config_initial = float(StrategyConfigService.get('initial_capital') or 100000)
         if not cash:
-            initial = float(StrategyConfigService.get('initial_capital') or 100000)
-            cash = StrategyCash(balance=initial, initial_capital=initial)
+            cash = StrategyCash(balance=config_initial, initial_capital=config_initial)
             db.add(cash)
+            db.commit()
+        elif cash.initial_capital != config_initial:
+            # 配置已变更，同步到 StrategyCash 表
+            diff = config_initial - cash.initial_capital
+            cash.initial_capital = config_initial
+            cash.balance = round(cash.balance + diff, 2)
             db.commit()
         db.close()
         db = next(get_db())

@@ -32,13 +32,6 @@ def create_app():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    try:
-        from backend.utils.migrate_db import add_stock_daily_columns, add_stock_daily_unique_constraint, add_trade_date_column
-        add_stock_daily_columns(engine)
-        add_stock_daily_unique_constraint(engine)
-        add_trade_date_column(engine)
-    except Exception as e:
-        print(f"[migrate] Migration note: {e}")
 
 if __name__ == '__main__':
     app = create_app()
