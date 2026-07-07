@@ -15,20 +15,11 @@ export const stockAPI = {
   getStock(code) {
     return api.get(`/stocks/${code}`)
   },
-  getStockDaily(code, days = 60) {
-    return api.get(`/stocks/${code}/daily`, { params: { days } })
-  },
-  getStockChart(code, days = 60) {
-    return api.get(`/stocks/${code}/chart`, { params: { days } })
-  },
   getStockIndicators(code, days = 120, indicators = '', params = '') {
     const queryParams = { days }
     if (indicators) queryParams.indicators = indicators
     if (params) queryParams.params = params
     return api.get(`/stocks/${code}/indicators`, { params: queryParams })
-  },
-  getIndicatorsList(code = '000001') {
-    return api.get(`/stocks/${code}/indicators/list`)
   },
   getTopGainers(limit = 10, date = null) {
     const params = { limit }

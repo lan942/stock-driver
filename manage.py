@@ -319,17 +319,15 @@ def crawler_status(args):
 
 
 def db_migrate(args):
-    """执行数据库迁移"""
-    print(blue("执行数据库迁移..."))
+    """初始化数据库表结构"""
+    print(blue("初始化数据库表结构..."))
     try:
-        from backend.utils.migrate_db import migrate
-        migrate()
-        print(green("数据库迁移完成"))
-    except ImportError as e:
-        print(red(f"导入模块失败: {e}"))
-        exit(1)
+        from backend.utils.db import engine, Base
+        import backend.models  # noqa: F401 — 注册所有 ORM 模型
+        Base.metadata.create_all(bind=engine)
+        print(green("数据库表结构初始化完成"))
     except Exception as e:
-        print(red(f"迁移失败: {e}"))
+        print(red(f"初始化失败: {e}"))
         exit(1)
 
 
@@ -369,7 +367,7 @@ def main():
   python manage.py crawler realtime --force   # 强制爬取实时行情
   python manage.py crawler daily --start-date 20260701 --end-date 20260703
   python manage.py crawler status --limit 20  # 查询最近20条爬取记录
-  python manage.py db migrate                # 执行数据库迁移
+  python manage.py db migrate                # 初始化数据库表结构
   python manage.py db backup                 # 备份数据库
         """,
     )
@@ -411,7 +409,7 @@ def main():
     db_parser = subparsers.add_parser("db", help="数据库管理")
     db_subparsers = db_parser.add_subparsers(dest="db_command")
 
-    db_migrate_parser = db_subparsers.add_parser("migrate", help="执行数据库迁移")
+    db_migrate_parser = db_subparsers.add_parser("migrate", help="初始化数据库表结构")
     db_migrate_parser.set_defaults(func=db_migrate)
 
     db_backup_parser = db_subparsers.add_parser("backup", help="备份数据库")

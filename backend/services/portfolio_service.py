@@ -332,15 +332,6 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float, trade_
     }
 
 
-def get_cash_balance() -> float:
-    """获取现金余额"""
-    db = next(get_db())
-    cash_balance = db.query(CashBalance).first()
-    balance = cash_balance.balance if cash_balance else 0.0
-    db.close()
-    return round(balance, 2)
-
-
 def update_cash_balance(amount: float) -> Dict[str, Any]:
     """更新现金余额"""
     db = next(get_db())

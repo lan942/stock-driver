@@ -198,42 +198,6 @@ def get_stock(code):
     })
 
 
-@api.route('/stocks/<code>/daily', methods=['GET'])
-def get_stock_daily(code):
-    db = next(get_db())
-    days = request.args.get('days', 60, type=int)
-
-    analysis = StockAnalysis.get_stock_analysis(db, code, days)
-    if not analysis:
-        return jsonify({'error': '没有找到数据'}), 404
-
-    return jsonify(analysis)
-
-
-@api.route('/stocks/<code>/chart', methods=['GET'])
-def get_stock_chart(code):
-    db = next(get_db())
-    days = request.args.get('days', 60, type=int)
-
-    daily_data = db.query(StockDaily).filter(
-        StockDaily.code == code
-    ).order_by(StockDaily.date.desc()).limit(days).all()
-
-    if not daily_data:
-        return jsonify({'error': '没有找到数据'}), 404
-
-    result = [{
-        'date': item.date.strftime('%Y-%m-%d'),
-        'open': item.open,
-        'high': item.high,
-        'low': item.low,
-        'close': item.close,
-        'volume': item.volume
-    } for item in reversed(daily_data)]
-
-    return jsonify(result)
-
-
 @api.route('/stocks/<code>/indicators', methods=['GET'])
 def get_stock_indicators(code):
     """获取股票技术指标（Backtrader 计算）"""
@@ -275,12 +239,6 @@ def get_stock_indicators(code):
         return jsonify({'error': '没有找到数据'}), 404
 
     return jsonify(result)
-
-
-@api.route('/stocks/<code>/indicators/list', methods=['GET'])
-def get_stock_indicators_list(code):
-    """返回可用的技术指标清单"""
-    return jsonify({'indicators': IndicatorEngine.get_indicator_list()})
 
 
 @api.route('/stocks/top/gainers', methods=['GET'])

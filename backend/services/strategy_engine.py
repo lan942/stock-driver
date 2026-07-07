@@ -4,14 +4,10 @@
 输出 TOP N 买入推荐（含建议买入价、目标止盈价、止损价）。
 """
 
-import math
-from datetime import date, timedelta
 from typing import Optional
 
-from sqlalchemy import func
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
-from backend.services.indicator_engine import IndicatorEngine
 from backend.services.strategy_config import StrategyConfigService
 
 
@@ -26,14 +22,6 @@ class StrategyEngine:
         'reversal': 0.15,
         'volatility': 0.10,
     }
-
-    @staticmethod
-    def _get_latest_date() -> Optional[date]:
-        """获取数据库中最新的交易日"""
-        db = next(get_db())
-        result = db.query(func.max(StockDaily.date)).scalar()
-        db.close()
-        return result
 
     @staticmethod
     def _get_all_codes() -> list:
@@ -72,27 +60,6 @@ class StrategyEngine:
             'change_pcts': change_pcts,
             'latest': records[-1] if records else None,
         }
-
-    @staticmethod
-    def _get_indicators(code: str, days: int = 60) -> Optional[dict]:
-        """获取技术指标"""
-        try:
-            result = IndicatorEngine.compute(
-                code,
-                [
-                    {'type': 'MA', 'params': {'period': 5}},
-                    {'type': 'MA', 'params': {'period': 20}},
-                ],
-                days,
-            )
-            if result is None:
-                return None
-
-            ma5_vals = result['indicators'].get('ma', {}).get('values', [])
-            # Get MA20 - need separate call or reuse
-            return {'ma5': ma5_vals, 'data': result}
-        except Exception:
-            return None
 
     @staticmethod
     def _is_limit_up_down(latest: StockDaily) -> bool:

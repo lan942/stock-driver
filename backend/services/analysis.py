@@ -1,67 +1,8 @@
-import pandas as pd
 from backend.models.stock import Stock, StockDaily
 from sqlalchemy import func
 
 
 class StockAnalysis:
-    @staticmethod
-    def calculate_ma(data, period):
-        data[f'ma{period}'] = data['close'].rolling(window=period).mean()
-        return data
-
-    @staticmethod
-    def calculate_macd(data):
-        data['ema12'] = data['close'].ewm(span=12, adjust=False).mean()
-        data['ema26'] = data['close'].ewm(span=26, adjust=False).mean()
-        data['macd'] = data['ema12'] - data['ema26']
-        data['signal'] = data['macd'].ewm(span=9, adjust=False).mean()
-        data['histogram'] = data['macd'] - data['signal']
-        return data
-
-    @staticmethod
-    def calculate_rsi(data, period=14):
-        delta = data['close'].diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(window=period).mean()
-        avg_loss = loss.rolling(window=period).mean()
-        rs = avg_gain / avg_loss
-        data['rsi'] = 100 - (100 / (1 + rs))
-        return data
-
-    @staticmethod
-    def get_stock_analysis(db, code, days=60):
-        daily_data = db.query(StockDaily).filter(
-            StockDaily.code == code
-        ).order_by(StockDaily.date.desc()).limit(days).all()
-
-        if not daily_data:
-            return None
-
-        data = []
-        for item in daily_data:
-            data.append({
-                'date': item.date.strftime('%Y-%m-%d'),
-                'open': item.open,
-                'high': item.high,
-                'low': item.low,
-                'close': item.close,
-                'volume': item.volume,
-                'change_percent': item.change_percent
-            })
-
-        df = pd.DataFrame(data)
-        df = df.sort_values('date')
-
-        df = StockAnalysis.calculate_ma(df, 5)
-        df = StockAnalysis.calculate_ma(df, 10)
-        df = StockAnalysis.calculate_ma(df, 20)
-        df = StockAnalysis.calculate_ma(df, 60)
-        df = StockAnalysis.calculate_macd(df)
-        df = StockAnalysis.calculate_rsi(df)
-
-        return df.to_dict('records')
-
     @staticmethod
     def get_top_gainers(db, limit=10, query_date=None):
         """涨幅榜：按指定日期从 StockDaily 表查询 change_percent 降序 Top N。

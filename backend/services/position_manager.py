@@ -67,64 +67,6 @@ class PositionManager:
     # ─── 持仓操作 ─────────────────────────────────────────
 
     @staticmethod
-    def open_position(
-        code: str,
-        name: str,
-        quantity: int,
-        buy_price: float,
-        suggested_buy_price: float,
-        target_price: float,
-        stop_price: float,
-        buy_date: date,
-    ) -> dict:
-        """开仓：创建持仓记录、扣减资金、记录交易"""
-        db = next(get_db())
-        try:
-            amount = round(buy_price * quantity, 2)
-            trade_date = buy_date
-
-            # 创建持仓
-            position = StrategyPosition(
-                code=code,
-                name=name,
-                quantity=quantity,
-                buy_price=buy_price,
-                target_price=target_price,
-                stop_price=stop_price,
-                suggested_buy_price=suggested_buy_price,
-                buy_date=buy_date,
-                status='holding',
-            )
-            db.add(position)
-
-            # 记录交易
-            tx = StrategyTransaction(
-                type='buy',
-                code=code,
-                quantity=quantity,
-                price=buy_price,
-                amount=amount,
-                trade_date=trade_date,
-            )
-            db.add(tx)
-
-            db.commit()
-            pos_id = position.id
-        finally:
-            db.close()
-
-        # 扣减资金
-        PositionManager._update_cash(-amount)
-
-        return {
-            'position_id': pos_id,
-            'code': code,
-            'buy_price': buy_price,
-            'quantity': quantity,
-            'amount': amount,
-        }
-
-    @staticmethod
     def execute_recommendation(
         code: str,
         name: str,

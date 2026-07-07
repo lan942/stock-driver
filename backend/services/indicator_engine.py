@@ -113,7 +113,7 @@ INDICATOR_REGISTRY = {
     'ADX': _create_adx,
 }
 
-# 指标元数据（用于 /indicators/list API）
+# 指标元数据
 INDICATOR_META = [
     {"id": "MA", "name": "移动平均线", "default_params": {"period": 20}, "description": "简单移动平均线"},
     {"id": "EMA", "name": "指数移动平均线", "default_params": {"period": 20}, "description": "指数加权移动平均线"},
@@ -279,15 +279,6 @@ def _cache_set(code: str, days: int, configs_json: str, data: dict):
         oldest = min(_cache, key=lambda k: _cache[k]['time'])
         del _cache[oldest]
     _cache[key] = {'time': time.time(), 'data': data}
-
-
-def invalidate_cache(code: str = None):
-    """使缓存失效。传入 code 则清除对应股票的所有缓存；不传则清空全部"""
-    global _cache
-    if code:
-        _cache = {k: v for k, v in _cache.items() if not k.startswith(f"{code}_")}
-    else:
-        _cache.clear()
 
 
 # ─── 引擎主体 ─────────────────────────────────────────────

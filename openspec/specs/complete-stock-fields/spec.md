@@ -121,7 +121,7 @@ API在返回股票数据时，SHALL 从Stock表读取基本信息、从StockDail
 │                                                             │
 │  API (routes.py)                                            │
 │  (GET /api/stocks, GET /api/stocks/{code},                 │
-│   GET /api/stocks/{code}/daily, GET /api/stocks/top/*)     │
+│   GET /api/stocks/{code}/indicators, GET /api/stocks/top/*)│
 │      │                                                      │
 │      ▼                                                      │
 │  前端展示                                                    │

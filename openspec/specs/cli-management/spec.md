@@ -54,12 +54,12 @@ Provide command-line interface for managing stock-driver service lifecycle, craw
 - **AND** 以表格形式输出状态记录
 
 ### Requirement: 数据库管理命令
-`manage.py` SHALL 提供 `db` 子命令组，支持数据库迁移和备份。
+`manage.py` SHALL 提供 `db` 子命令组，支持数据库初始化和备份。
 
-#### Scenario: 执行数据库迁移
+#### Scenario: 初始化数据库表结构
 - **WHEN** 用户执行 `python manage.py db migrate`
-- **THEN** 脚本 SHALL 调用 `backend.utils.migrate_db.migrate()` 函数
-- **AND** 输出迁移步骤和结果（成功/失败）
+- **THEN** 脚本 SHALL 调用 `Base.metadata.create_all()` 创建所有 ORM 模型对应的表
+- **AND** 输出初始化结果
 
 #### Scenario: 备份数据库
 - **WHEN** 用户执行 `python manage.py db backup`

@@ -259,18 +259,6 @@ class StockListCrawler(CrawlerBase):
                 continue
         return result
 
-    def _normalize_dataframe(self, df: pd.DataFrame) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for _, row in df.iterrows():
-            try:
-                normalized = normalize_stock_list_row(row.to_dict())
-                if normalized["code"] and normalized["name"]:
-                    result.append(normalized)
-            except Exception as e:
-                logger.warning("Failed to normalize stock list row: %s", e)
-                continue
-        return result
-
     def fetch_stock_list(self) -> list[dict[str, Any]]:
         result = self.fetch()
         if not result.success:
