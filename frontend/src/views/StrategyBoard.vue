@@ -97,7 +97,22 @@
     <!-- 回测面板 -->
     <el-card class="section-card">
       <template #header>
-        <span>策略回测</span>
+        <span class="header-title">
+          策略回测
+          <el-tooltip placement="right" effect="light">
+            <template #content>
+              <div style="max-width: 380px; line-height: 1.7; font-size: 12px;">
+                <div style="font-weight: bold; margin-bottom: 6px;">回测时间范围说明</div>
+                <div>· <b>起始/截止日期</b>：整个回测运行的时间范围，不是"初始化数据范围"</div>
+                <div>· <b>第一天</b>从空仓开始买入（无卖出操作）</div>
+                <div>· <b>每日循环</b>：检测卖出（止盈/止损/超时）→ 选股买入 → 记录权益</div>
+                <div>· <b>选股评分</b>：用当天之前 60 个交易日的历史数据计算因子（滚动窗口，非固定窗口）</div>
+                <div>· <b>截止日</b>统计总收益、胜率、年化收益等指标</div>
+              </div>
+            </template>
+            <span class="help-icon">?</span>
+          </el-tooltip>
+        </span>
         <div style="float:right;display:flex;gap:8px">
           <el-button size="small" @click="clearBacktestHandler">清空数据</el-button>
           <el-button type="warning" size="small" @click="runBacktestHandler" :loading="backtesting">
@@ -585,6 +600,30 @@ onMounted(async () => {
 }
 .section-card {
   margin-top: 16px;
+}
+.header-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #909399;
+  border: 1px solid #c0c4cc;
+  border-radius: 50%;
+  cursor: help;
+  user-select: none;
+  line-height: 1;
+}
+.help-icon:hover {
+  color: #409eff;
+  border-color: #409eff;
 }
 .action-bar {
   margin-top: 16px;

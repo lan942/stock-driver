@@ -204,7 +204,7 @@ class StrategyBacktest:
     # ─── 生成推荐 ─────────────────────────────────────────
 
     def _generate_recommendations(self, before_date: date, available_slots: int, available_cash: float) -> list:
-        """生成买入推荐"""
+        """生成买入候选（T日收盘后生成，限价 = T日收盘价 × 1.01，T+1日开盘才成交）"""
         if available_slots <= 0:
             return []
 
@@ -227,19 +227,70 @@ class StrategyBacktest:
             close = s['latest_close']
             if not close or close <= 0:
                 continue
-            buy_price = round(close * 1.01, 2)
+            limit_price = round(close * 1.01, 2)
             alloc = available_cash * self.position_ratio
-            if alloc < buy_price * 100:
+            if alloc < limit_price * 100:
                 continue
             recs.append({
                 'code': s['code'],
                 'name': stock_names.get(s['code'], ''),
                 'score': s['total_score'],
                 'factor_scores': s['factor_scores'],
-                'buy_price': buy_price,
-                'close': close,
+                'limit_price': limit_price,
+                'prev_close': close,
             })
         return recs
+
+    # ─── 执行候选买入（T+1日开盘） ────────────────────────
+
+    def _execute_pending_buys(self, day: date, day_data: dict, pending: list) -> int:
+        """执行待成交买入：以当日 open 成交，open > 限价则放弃
+
+        Args:
+            day: 当前交易日（T+1）
+            day_data: 当日所有股票数据 {code: StockDaily}
+            pending: 候选列表（T 日生成）
+
+        Returns:
+            实际成交数量
+        """
+        if not pending:
+            return 0
+
+        positions = self._get_db_positions()
+        used_slots = len(positions)
+        available_slots = self.max_positions - used_slots
+        available_cash = backtest_service.get_cash_balance()
+        executed = 0
+
+        for rec in pending:
+            if available_slots <= 0:
+                break
+            stock = day_data.get(rec['code'])
+            if not stock or stock.open is None or stock.open <= 0:
+                continue
+            # 高开超过限价，放弃买入
+            if stock.open > rec['limit_price']:
+                continue
+            buy_price = stock.open
+            alloc = available_cash * self.position_ratio
+            if alloc < buy_price * 100:
+                continue
+            result = backtest_service.add_transaction(
+                tx_type='buy',
+                code=rec['code'],
+                quantity=100,
+                price=buy_price,
+                trade_date=day.strftime('%Y-%m-%d'),
+            )
+            if 'error' not in result:
+                amount = round(buy_price * 100, 2)
+                backtest_service.update_cash(-amount)
+                available_cash -= amount
+                available_slots -= 1
+                executed += 1
+
+        return executed
 
     # ─── 主循环 ───────────────────────────────────────────
 
@@ -269,6 +320,7 @@ class StrategyBacktest:
 
         self.daily_records = []
         sell_log = []  # 交易明细
+        pending_recs = []  # T 日生成的候选，T+1 日开盘成交
 
         for day in trading_days:
             day_data = self._get_stock_data_for_date(day)
@@ -299,25 +351,18 @@ class StrategyBacktest:
                     'reason': item['reason'],
                 })
 
-            # 2. 可用仓位
-            positions = self._get_db_positions()
-            available_slots = self.max_positions - len(positions)
-            available_cash = backtest_service.get_cash_balance()
+            # 2. 执行昨日候选的买入（T+1 日开盘成交，超限价放弃）
+            self._execute_pending_buys(day, day_data, pending_recs)
+            pending_recs = []  # 候选已处理（成交或丢弃）
 
-            # 3. 生成推荐并买入
-            if available_slots > 0 and available_cash > 0:
-                recs = self._generate_recommendations(day, available_slots, available_cash)
-                for rec in recs:
-                    result = backtest_service.add_transaction(
-                        tx_type='buy',
-                        code=rec['code'],
-                        quantity=100,
-                        price=rec['buy_price'],
-                        trade_date=day.strftime('%Y-%m-%d'),
-                    )
-                    if 'error' not in result:
-                        amount = round(rec['buy_price'] * 100, 2)
-                        backtest_service.update_cash(-amount)
+            # 3. 生成今日候选（收盘后生成，留到明日开盘成交）
+            #    最后一天不再生成候选（没有 T+1 可以成交）
+            if day != trading_days[-1]:
+                positions = self._get_db_positions()
+                available_slots = self.max_positions - len(positions)
+                available_cash = backtest_service.get_cash_balance()
+                if available_slots > 0 and available_cash > 0:
+                    pending_recs = self._generate_recommendations(day, available_slots, available_cash)
 
             # 4. 记录当日权益
             positions = self._get_db_positions()
