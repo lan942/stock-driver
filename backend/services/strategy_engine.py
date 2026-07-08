@@ -32,7 +32,7 @@ class StrategyEngine:
         return codes
 
     @staticmethod
-    def _get_stock_daily_data(code: str, days: int = 60) -> dict:
+    def _get_stock_daily_data(code: str, days: int = 30) -> dict:
         """获取单只股票最近 N 日数据"""
         db = next(get_db())
         records = (
@@ -214,7 +214,7 @@ class StrategyEngine:
     @staticmethod
     def score_stock(code: str) -> Optional[dict]:
         """对单只股票进行综合评分"""
-        data = StrategyEngine._get_stock_daily_data(code, days=60)
+        data = StrategyEngine._get_stock_daily_data(code, days=30)
         if data is None or data['latest'] is None:
             return None
 

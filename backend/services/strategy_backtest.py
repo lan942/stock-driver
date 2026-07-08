@@ -84,7 +84,7 @@ class StrategyBacktest:
         return {row.code: row for row in rows if row.close and row.close > 0}
 
     @staticmethod
-    def _get_stock_data_before_date(code: str, before_date: date, days: int = 60) -> dict:
+    def _get_stock_data_before_date(code: str, before_date: date, days: int = 30) -> dict:
         """获取某日之前最近 N 日数据（用于因子计算）"""
         db = next(get_db())
         rows = (
@@ -110,7 +110,7 @@ class StrategyBacktest:
     @staticmethod
     def _score_stock_for_date(code: str, before_date: date) -> Optional[dict]:
         """在指定日期对股票评分（基于该日期之前的数据）"""
-        data = StrategyBacktest._get_stock_data_before_date(code, before_date, days=60)
+        data = StrategyBacktest._get_stock_data_before_date(code, before_date, days=30)
         if data is None or data['latest'] is None:
             return None
         if StrategyEngine._is_limit_up_down(data['latest']):
@@ -160,6 +160,18 @@ class StrategyBacktest:
             })
         db.close()
         return result
+
+    @staticmethod
+    def _calc_equity(day_data: dict) -> float:
+        """计算当前总权益 = 现金 + 持仓市值（按当日收盘价）"""
+        positions = StrategyBacktest._get_db_positions()
+        cash = backtest_service.get_cash_balance()
+        positions_value = 0.0
+        for pos in positions:
+            stock = day_data.get(pos['code'])
+            if stock and stock.close:
+                positions_value += stock.close * pos['quantity']
+        return round(cash + positions_value, 2)
 
     # ─── 卖出检测 ─────────────────────────────────────────
 
@@ -246,6 +258,9 @@ class StrategyBacktest:
     def _execute_pending_buys(self, day: date, day_data: dict, pending: list) -> int:
         """执行待成交买入：以当日 open 成交，open > 限价则放弃
 
+        买入数量按可分配资金动态计算，必须是 100 的整数倍（A股最小交易单位），
+        且总花费不超过可用现金。每笔成交后记录当日开收盘价和交易后权益。
+
         Args:
             day: 当前交易日（T+1）
             day_data: 当日所有股票数据 {code: StockDaily}
@@ -273,19 +288,39 @@ class StrategyBacktest:
             if stock.open > rec['limit_price']:
                 continue
             buy_price = stock.open
+            # 可分配资金 = 可用现金 × 仓位比例
             alloc = available_cash * self.position_ratio
-            if alloc < buy_price * 100:
+            # 计算可买股数（必须是 100 的整数倍）
+            quantity = int(alloc / buy_price) // 100 * 100
+            if quantity < 100:
                 continue
+            # 确保总花费不超过可用现金（边界保护）
+            total_cost = buy_price * quantity
+            if total_cost > available_cash:
+                quantity -= 100
+                if quantity < 100:
+                    continue
+                total_cost = buy_price * quantity
             result = backtest_service.add_transaction(
                 tx_type='buy',
                 code=rec['code'],
-                quantity=100,
+                quantity=quantity,
                 price=buy_price,
                 trade_date=day.strftime('%Y-%m-%d'),
+                open_price=stock.open,
+                close_price=stock.close,
             )
             if 'error' not in result:
-                amount = round(buy_price * 100, 2)
+                amount = round(total_cost, 2)
                 backtest_service.update_cash(-amount)
+                # 买入后计算权益并更新交易记录
+                equity_after = self._calc_equity(day_data)
+                db = next(get_db())
+                tx = db.query(BacktestTransaction).order_by(BacktestTransaction.id.desc()).first()
+                if tx:
+                    tx.equity_after = equity_after
+                    db.commit()
+                db.close()
                 available_cash -= amount
                 available_slots -= 1
                 executed += 1
@@ -329,15 +364,26 @@ class StrategyBacktest:
             # 1. 检测卖出
             sell_items = self._check_sell_for_day(day, day_data)
             for item in sell_items:
+                stock = day_data.get(item['code'])
                 backtest_service.add_transaction(
                     tx_type='sell',
                     code=item['code'],
                     quantity=item['quantity'],
                     price=item['sell_price'],
                     trade_date=day.strftime('%Y-%m-%d'),
+                    open_price=stock.open if stock else None,
+                    close_price=stock.close if stock else None,
                 )
                 amount = round(item['sell_price'] * item['quantity'], 2)
                 backtest_service.update_cash(amount)
+                # 卖出后计算权益并更新交易记录
+                equity_after = self._calc_equity(day_data)
+                db = next(get_db())
+                tx = db.query(BacktestTransaction).order_by(BacktestTransaction.id.desc()).first()
+                if tx:
+                    tx.equity_after = equity_after
+                    db.commit()
+                db.close()
 
                 profit_pct = round(
                     (item['sell_price'] - item['cost_price']) / item['cost_price'] * 100, 2

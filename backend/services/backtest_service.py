@@ -215,10 +215,13 @@ def delete_holding(holding_id: int) -> Dict[str, Any]:
 
 
 def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
-    """获取回测交易记录列表"""
+    """获取回测交易记录列表（按交易日期正序）"""
     db = next(get_db())
 
-    transactions = db.query(BacktestTransaction).order_by(BacktestTransaction.created_at.desc()).limit(limit).all()
+    transactions = db.query(BacktestTransaction).order_by(
+        BacktestTransaction.trade_date.asc(),
+        BacktestTransaction.id.asc(),
+    ).limit(limit).all()
 
     result = []
     for tx in transactions:
@@ -234,6 +237,9 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
             'price': round(tx.price, 2),
             'amount': round(tx.amount, 2) if tx.amount else round(tx.quantity * tx.price, 2),
             'trade_date': tx.trade_date.strftime('%Y-%m-%d') if tx.trade_date else '',
+            'open_price': round(tx.open_price, 2) if tx.open_price is not None else None,
+            'close_price': round(tx.close_price, 2) if tx.close_price is not None else None,
+            'equity_after': round(tx.equity_after, 2) if tx.equity_after is not None else None,
             'created_at': tx.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
 
@@ -241,7 +247,16 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
     return result
 
 
-def add_transaction(tx_type: str, code: str, quantity: int, price: float, trade_date: Optional[str] = None) -> Dict[str, Any]:
+def add_transaction(
+    tx_type: str,
+    code: str,
+    quantity: int,
+    price: float,
+    trade_date: Optional[str] = None,
+    open_price: Optional[float] = None,
+    close_price: Optional[float] = None,
+    equity_after: Optional[float] = None,
+) -> Dict[str, Any]:
     """添加回测交易记录"""
     # 验证数量必须是100的整数倍
     if quantity % 100 != 0:
@@ -311,7 +326,10 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float, trade_
         quantity=quantity,
         price=price,
         amount=amount,
-        trade_date=parsed_date
+        trade_date=parsed_date,
+        open_price=open_price,
+        close_price=close_price,
+        equity_after=equity_after,
     )
     db.add(transaction)
     db.commit()
@@ -328,6 +346,9 @@ def add_transaction(tx_type: str, code: str, quantity: int, price: float, trade_
         'price': round(transaction.price, 2),
         'amount': round(transaction.amount, 2),
         'trade_date': transaction.trade_date.strftime('%Y-%m-%d') if transaction.trade_date else '',
+        'open_price': round(transaction.open_price, 2) if transaction.open_price is not None else None,
+        'close_price': round(transaction.close_price, 2) if transaction.close_price is not None else None,
+        'equity_after': round(transaction.equity_after, 2) if transaction.equity_after is not None else None,
         'created_at': transaction.created_at.strftime('%Y-%m-%d %H:%M:%S')
     }
 

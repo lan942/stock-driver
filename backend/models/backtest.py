@@ -33,6 +33,9 @@ class BacktestTransaction(Base):
     price = Column(Float, nullable=False)
     amount = Column(Float)
     trade_date = Column(Date, default=func.current_date())
+    open_price = Column(Float)
+    close_price = Column(Float)
+    equity_after = Column(Float)
     created_at = Column(DateTime, server_default=func.now())
 
 

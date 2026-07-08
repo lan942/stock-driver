@@ -7,20 +7,15 @@ from backend.services.analysis import StockAnalysis
 from backend.services.indicator_engine import IndicatorEngine
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
-from backend.models.crawl_status import CrawlStatus
 from backend.services.crawler.base import CrawlerError
 from backend.services.crawler.stock_list import StockListCrawler, DEFAULT_SOURCES as STOCK_LIST_SOURCES
-from backend.services.crawler.stock_realtime import StockRealtimeCrawler
 from backend.services.crawler.stock_daily import TencentStockDailyCrawler
 from backend.services.stock_service import (
     save_stock_list,
-    save_realtime_quotes,
     save_daily_batch,
     record_crawl_status,
-    has_today_success_record,
     get_daily_summary,
 )
-from backend.services.scheduler import get_scheduler
 from backend.services.portfolio_service import (
     get_portfolio_overview,
     get_holdings,
@@ -381,77 +376,6 @@ def update_stock_list():
     })
 
 
-@api.route('/crawler/update_realtime', methods=['POST'])
-def update_realtime():
-    force = request.json.get('force', True) if request.is_json else True
-    quote_date_str = request.json.get('date', None) if request.is_json else None
-
-    if not force:
-        today = date.today()
-        if has_today_success_record('realtime', today):
-            return jsonify({
-                'message': '今日已有成功爬取记录，如需强制更新请勾选强制刷新',
-                'success_count': 0,
-                'fail_count': 0,
-                'elapsed': 0,
-                'skipped': True,
-            })
-
-    quote_date = None
-    if quote_date_str:
-        quote_date = datetime.strptime(quote_date_str, '%Y-%m-%d').date()
-
-    start_time = time.time()
-    crawler = StockRealtimeCrawler()
-    df = crawler.fetch_realtime_df()
-    elapsed = round(time.time() - start_time, 1)
-    if df.empty:
-        return jsonify({'message': '获取实时行情失败', 'success_count': 0, 'fail_count': 0, 'elapsed': elapsed}), 500
-
-    success_count, fail_count = save_realtime_quotes(df, quote_date=quote_date)
-    status = "success" if fail_count == 0 else "partial"
-    record_crawl_status(
-        crawl_type="realtime",
-        status=status,
-        success_count=success_count,
-        fail_count=fail_count,
-    )
-    return jsonify({
-        'message': f'成功更新 {success_count} 只股票实时数据',
-        'success_count': success_count,
-        'fail_count': fail_count,
-        'elapsed': elapsed,
-        'price_date': quote_date.strftime('%Y-%m-%d') if quote_date else date.today().strftime('%Y-%m-%d'),
-    })
-
-
-@api.route('/crawler/fetch_daily/<code>', methods=['POST'])
-def fetch_daily(code):
-    """获取单只股票历史日线数据（腾讯源）"""
-    data = request.get_json(silent=True) or {}
-    start_date = data.get('start_date', '20250101')
-    end_date = data.get('end_date', datetime.now().strftime('%Y%m%d'))
-    adjust = data.get('adjust', 'qfq')
-
-    try:
-        crawler = TencentStockDailyCrawler()
-        df = crawler.fetch_single(code, start_date, end_date, adjust)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    if df.empty:
-        return jsonify({'message': '没有获取到数据'}), 404
-
-    success_stocks, fail_stocks, added, updated = save_daily_batch([df])
-    return jsonify({
-        'message': f'成功获取 {len(df)} 条日线数据',
-        'count': len(df),
-        'added': added,
-        'updated': updated,
-        'code': code,
-    })
-
-
 @api.route('/crawler/fetch_daily_batch', methods=['POST'])
 def fetch_daily_batch():
     """批量获取股票日线数据（腾讯源），异步执行，通过 /crawler/progress/daily 查询进度"""
@@ -559,64 +483,6 @@ def get_daily_progress():
     with _daily_crawl_lock:
         progress = dict(_daily_crawl_progress)
     return jsonify(progress)
-
-
-@api.route('/crawl_status', methods=['GET'])
-def get_crawl_status():
-    db = next(get_db())
-    limit = request.args.get('limit', 10, type=int)
-    crawl_type = request.args.get('crawl_type', None)
-
-    query = db.query(CrawlStatus).order_by(CrawlStatus.crawl_time.desc())
-
-    if crawl_type:
-        query = query.filter(CrawlStatus.crawl_type == crawl_type)
-
-    statuses = query.limit(limit).all()
-
-    result = [{
-        'id': s.id,
-        'crawl_type': s.crawl_type,
-        'status': s.status,
-        'crawl_time': s.crawl_time.strftime('%Y-%m-%d %H:%M:%S'),
-        'success_count': s.success_count,
-        'fail_count': s.fail_count,
-        'error_message': s.error_message
-    } for s in statuses]
-
-    db.close()
-    return jsonify(result)
-
-
-@api.route('/scheduler/info', methods=['GET'])
-def get_scheduler_info():
-    scheduler = get_scheduler()
-    jobs = scheduler.get_jobs_info()
-    return jsonify({
-        'running': scheduler.scheduler.running,
-        'jobs': jobs
-    })
-
-
-@api.route('/scheduler/pause', methods=['POST'])
-def pause_scheduler():
-    scheduler = get_scheduler()
-    scheduler.pause()
-    return jsonify({'message': '调度器已暂停'})
-
-
-@api.route('/scheduler/resume', methods=['POST'])
-def resume_scheduler():
-    scheduler = get_scheduler()
-    scheduler.resume()
-    return jsonify({'message': '调度器已恢复'})
-
-
-@api.route('/scheduler/run/<job_id>', methods=['POST'])
-def run_job(job_id):
-    scheduler = get_scheduler()
-    scheduler.run_job(job_id)
-    return jsonify({'message': f'任务 {job_id} 已立即执行'})
 
 
 @api.route('/portfolio/overview', methods=['GET'])

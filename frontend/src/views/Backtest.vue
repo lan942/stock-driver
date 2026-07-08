@@ -126,19 +126,34 @@
         </el-table-column>
         <el-table-column prop="code" label="股票代码" width="100" />
         <el-table-column prop="name" label="股票名称" width="120" />
-        <el-table-column prop="quantity" label="数量" width="100">
+        <el-table-column prop="quantity" label="数量" width="90">
           <template #default="{ row }">
             {{ row.quantity.toLocaleString() }} 股
           </template>
         </el-table-column>
-        <el-table-column prop="price" label="成交价" width="100">
+        <el-table-column prop="price" label="成交价" width="90">
           <template #default="{ row }">
             ¥{{ row.price.toFixed(2) }}
           </template>
         </el-table-column>
-        <el-table-column prop="amount" label="成交金额" width="120">
+        <el-table-column prop="open_price" label="开盘价" width="90">
+          <template #default="{ row }">
+            {{ row.open_price !== null && row.open_price !== undefined ? '¥' + row.open_price.toFixed(2) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="close_price" label="收盘价" width="90">
+          <template #default="{ row }">
+            {{ row.close_price !== null && row.close_price !== undefined ? '¥' + row.close_price.toFixed(2) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="amount" label="成交金额" width="110">
           <template #default="{ row }">
             ¥{{ formatNumber(row.amount) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="equity_after" label="交易后权益" width="120">
+          <template #default="{ row }">
+            {{ row.equity_after !== null && row.equity_after !== undefined ? '¥' + formatNumber(row.equity_after) : '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="trade_date" label="交易日期" width="110">

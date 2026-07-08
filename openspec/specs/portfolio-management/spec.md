@@ -71,3 +71,49 @@ The system SHALL calculate the total portfolio value as the sum of cash balance 
 #### Scenario: Calculate total portfolio value
 - **WHEN** system retrieves portfolio overview
 - **THEN** system sums cash balance and (current_price * quantity) for all holdings
+
+### Requirement: Backtest transaction records include trading day prices
+The system SHALL record `open_price` and `close_price` for each backtest transaction to enable data verification.
+
+#### Scenario: Record buy transaction with prices
+- **WHEN** strategy backtest executes a buy transaction on T+1 trading day
+- **THEN** system records `open_price` (used as buy price) and `close_price` (end-of-day price) for the trading day
+
+#### Scenario: Record sell transaction with prices
+- **WHEN** strategy backtest executes a sell transaction
+- **THEN** system records `open_price` and `close_price` for the trading day
+
+### Requirement: Backtest transaction records include post-trade equity
+The system SHALL record `equity_after` (total equity after transaction) for each backtest transaction to enable profit tracking.
+
+#### Scenario: Record equity after buy
+- **WHEN** a buy transaction completes
+- **THEN** system calculates equity_after = cash_balance + sum(holding_quantity * close_price) and stores it in the transaction record
+
+#### Scenario: Record equity after sell
+- **WHEN** a sell transaction completes
+- **THEN** system calculates equity_after = cash_balance + sum(holding_quantity * close_price) and stores it in the transaction record
+
+#### Scenario: Verify final equity consistency
+- **WHEN** backtest completes
+- **THEN** the last transaction's equity_after equals the final_equity reported in the backtest summary
+
+### Requirement: Backtest transactions sorted by trade date ascending
+The system SHALL return backtest transactions sorted by trade_date ascending, then by transaction ID ascending.
+
+#### Scenario: Retrieve transactions in chronological order
+- **WHEN** client requests `GET /api/backtest/transactions`
+- **THEN** transactions are returned in chronological order (earliest first)
+
+### Requirement: Dynamic buy quantity calculation for backtest
+The system SHALL calculate buy quantity dynamically based on available capital and position ratio, ensuring quantity is a multiple of 100 (A-share minimum trading unit).
+
+#### Scenario: Calculate buy quantity for available capital
+- **WHEN** strategy backtest executes pending buys
+- **THEN** system calculates quantity = floor(available_cash * position_ratio / buy_price) // 100 * 100
+- AND quantity >= 100 (minimum lot)
+- AND total_cost = quantity * buy_price <= available_cash
+
+#### Scenario: Reduce quantity when total cost exceeds cash
+- **WHEN** calculated quantity * buy_price > available_cash
+- **THEN** system reduces quantity by 100 shares and re-checks
