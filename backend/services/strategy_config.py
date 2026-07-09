@@ -14,10 +14,14 @@ DEFAULT_CONFIGS = {
     'stop_profit_pct': {'value': '0.06', 'description': '止盈比例'},
     'stop_loss_pct': {'value': '0.03', 'description': '止损比例'},
     'max_hold_days': {'value': '5', 'description': '最大持有天数'},
-    'factor_weights': {
-        'value': json.dumps({"trend": 0.30, "momentum": 0.25, "volume": 0.20, "reversal": 0.15, "volatility": 0.10}),
-        'description': '因子权重',
-    },
+    'strategy_type': {'value': 'breakout', 'description': '策略类型：trend_following/mean_reversion/breakout'},
+    'adaptive_score_threshold_behind': {'value': '0.50', 'description': '落后档选股最低分'},
+    'adaptive_score_threshold_near': {'value': '0.35', 'description': '接近档选股最低分'},
+    'adaptive_score_threshold_met': {'value': '0.15', 'description': '达标档选股最低分'},
+    'adaptive_position_ratio_behind': {'value': '0.10', 'description': '落后档单只仓位比例'},
+    'adaptive_position_ratio_near': {'value': '0.15', 'description': '接近档单只仓位比例'},
+    'adaptive_position_ratio_met': {'value': '0.20', 'description': '达标档单只仓位比例'},
+    'adaptive_min_days': {'value': '20', 'description': '动态调整预热交易日数'},
 }
 
 
@@ -45,20 +49,17 @@ class StrategyConfigService:
 
         raw = config.value
         if key in ('target_annual_return', 'initial_capital', 'stop_profit_pct', 'stop_loss_pct',
-                    'max_hold_days', 'position_ratio'):
+                    'max_hold_days', 'position_ratio',
+                    'adaptive_score_threshold_behind', 'adaptive_score_threshold_near', 'adaptive_score_threshold_met',
+                    'adaptive_position_ratio_behind', 'adaptive_position_ratio_near', 'adaptive_position_ratio_met'):
             try:
                 return float(raw)
             except ValueError:
                 return raw
-        if key == 'max_positions':
+        if key in ('max_positions', 'adaptive_min_days'):
             try:
                 return int(raw)
             except ValueError:
-                return raw
-        if key == 'factor_weights':
-            try:
-                return json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
                 return raw
         return raw
 

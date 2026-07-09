@@ -12,8 +12,8 @@ from typing import Optional
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
 from backend.models.backtest import BacktestPortfolio, BacktestTransaction, BacktestCash
-from backend.services.strategy_engine import StrategyEngine
 from backend.services.strategy_config import StrategyConfigService
+from backend.services.strategies import get_strategy
 from backend.services import backtest_service
 
 
@@ -30,6 +30,7 @@ class StrategyBacktest:
         stop_loss_pct: float = None,
         max_hold_days: int = None,
         position_ratio: float = None,
+        strategy_type: str = None,
     ):
         self.start_date = start_date
         self.end_date = end_date
@@ -51,6 +52,30 @@ class StrategyBacktest:
         self.position_ratio = position_ratio or float(
             StrategyConfigService.get('position_ratio') or 0.2
         )
+        self.strategy_type = strategy_type or StrategyConfigService.get('strategy_type') or 'trend_following'
+        self.strategy = get_strategy(self.strategy_type)
+
+        # 自适应参数：根据收益进度动态调整选股门槛和仓位
+        self.target_annual_return = float(
+            StrategyConfigService.get('target_annual_return') or 0.15
+        )
+        self.adaptive_thresholds = {
+            'behind': float(StrategyConfigService.get('adaptive_score_threshold_behind') or 0.65),
+            'near': float(StrategyConfigService.get('adaptive_score_threshold_near') or 0.50),
+            'met': float(StrategyConfigService.get('adaptive_score_threshold_met') or 0.35),
+        }
+        self.adaptive_ratios = {
+            'behind': float(StrategyConfigService.get('adaptive_position_ratio_behind') or 0.10),
+            'near': float(StrategyConfigService.get('adaptive_position_ratio_near') or 0.15),
+            'met': float(StrategyConfigService.get('adaptive_position_ratio_met') or 0.20),
+        }
+        self.adaptive_min_days = int(
+            StrategyConfigService.get('adaptive_min_days') or 20
+        )
+        # 当前生效的自适应参数（默认=达标档）
+        self._adaptive_score_threshold = self.adaptive_thresholds['met']
+        self._adaptive_position_ratio = self.adaptive_ratios['met']
+        self._current_tier = 'met'
 
         # 仅用于收益曲线，不入库
         self.daily_records = []
@@ -72,6 +97,60 @@ class StrategyBacktest:
             'deleted_positions': pos_count,
             'deleted_transactions': tx_count,
         }
+
+    # ─── 自适应参数计算 ──────────────────────────────────
+
+    def _compute_progress(self) -> tuple:
+        """计算当前收益进度（CAGR年化 vs 目标年化）
+
+        Returns:
+            (progress, annualized, days): 进度比值、当前年化收益率、已运行交易日数
+        """
+        n = len(self.daily_records)
+        if n == 0:
+            return (1.0, 0.0, 0)
+
+        current_equity = self.daily_records[-1]['equity']
+        total_return = (current_equity - self.initial_capital) / self.initial_capital
+        annualized = (1 + total_return) ** (252 / n) - 1
+
+        if self.target_annual_return <= 0:
+            progress = 1.0
+        else:
+            progress = annualized / self.target_annual_return
+
+        return (progress, annualized, n)
+
+    def _update_adaptive_params(self) -> str:
+        """根据收益进度更新选股门槛和仓位比例
+
+        Returns:
+            当前档位标识：'warmup'/'behind'/'near'/'met'
+        """
+        progress, annualized, days = self._compute_progress()
+
+        # 预热期：使用达标档参数（CAGR噪声太大）
+        if days < self.adaptive_min_days:
+            self._adaptive_score_threshold = self.adaptive_thresholds['met']
+            self._adaptive_position_ratio = self.adaptive_ratios['met']
+            self._current_tier = 'warmup'
+            return 'warmup'
+
+        # 三档调整
+        if progress < 0.5:
+            self._adaptive_score_threshold = self.adaptive_thresholds['behind']
+            self._adaptive_position_ratio = self.adaptive_ratios['behind']
+            self._current_tier = 'behind'
+        elif progress < 1.0:
+            self._adaptive_score_threshold = self.adaptive_thresholds['near']
+            self._adaptive_position_ratio = self.adaptive_ratios['near']
+            self._current_tier = 'near'
+        else:
+            self._adaptive_score_threshold = self.adaptive_thresholds['met']
+            self._adaptive_position_ratio = self.adaptive_ratios['met']
+            self._current_tier = 'met'
+
+        return self._current_tier
 
     # ─── 数据获取 ─────────────────────────────────────────
 
@@ -104,26 +183,46 @@ class StrategyBacktest:
             'closes': [r.close for r in rows if r.close],
             'volumes': [r.volume for r in rows if r.volume],
             'change_pcts': [r.change_percent for r in rows if r.change_percent is not None],
+            'highs': [r.high for r in rows if r.high],
+            'lows': [r.low for r in rows if r.low],
             'latest': rows[-1] if rows else None,
         }
 
-    @staticmethod
-    def _score_stock_for_date(code: str, before_date: date) -> Optional[dict]:
+    def _score_stock_for_date(self, code: str, before_date: date) -> Optional[dict]:
         """在指定日期对股票评分（基于该日期之前的数据）"""
         data = StrategyBacktest._get_stock_data_before_date(code, before_date, days=30)
         if data is None or data['latest'] is None:
             return None
-        if StrategyEngine._is_limit_up_down(data['latest']):
+        if self.strategy._is_limit_up_down(data['latest']):
             return None
 
-        weights = StrategyConfigService.get('factor_weights') or StrategyEngine.DEFAULT_WEIGHTS
-        factor_scores = {
-            'trend': StrategyEngine._factor_trend(data),
-            'momentum': StrategyEngine._factor_momentum(data),
-            'volume': StrategyEngine._factor_volume(data),
-            'reversal': StrategyEngine._factor_reversal(data),
-            'volatility': StrategyEngine._factor_volatility(data),
-        }
+        weights = self.strategy.DEFAULT_WEIGHTS
+        factor_scores = {}
+        if hasattr(self.strategy, '_factor_trend'):
+            factor_scores['trend'] = self.strategy._factor_trend(data)
+        if hasattr(self.strategy, '_factor_momentum'):
+            factor_scores['momentum'] = self.strategy._factor_momentum(data)
+        if hasattr(self.strategy, '_factor_volume'):
+            factor_scores['volume'] = self.strategy._factor_volume(data)
+        if hasattr(self.strategy, '_factor_reversal'):
+            factor_scores['reversal'] = self.strategy._factor_reversal(data)
+        if hasattr(self.strategy, '_factor_volatility'):
+            factor_scores['volatility'] = self.strategy._factor_volatility(data)
+        if hasattr(self.strategy, '_factor_bollinger'):
+            factor_scores['bollinger'] = self.strategy._factor_bollinger(data)
+        if hasattr(self.strategy, '_factor_rsi'):
+            factor_scores['rsi'] = self.strategy._factor_rsi(data)
+        if hasattr(self.strategy, '_factor_oversold'):
+            factor_scores['oversold'] = self.strategy._factor_oversold(data)
+        if hasattr(self.strategy, '_factor_stabilization'):
+            factor_scores['stabilization'] = self.strategy._factor_stabilization(data)
+        if hasattr(self.strategy, '_factor_breakout'):
+            factor_scores['breakout'] = self.strategy._factor_breakout(data)
+        if hasattr(self.strategy, '_factor_volume_confirm'):
+            factor_scores['volume_confirm'] = self.strategy._factor_volume_confirm(data)
+        if hasattr(self.strategy, '_factor_macd_cross'):
+            factor_scores['macd_cross'] = self.strategy._factor_macd_cross(data)
+
         total_score = sum(factor_scores[n] * weights.get(n, 0) for n in factor_scores)
         return {
             'code': code,
@@ -215,8 +314,12 @@ class StrategyBacktest:
 
     # ─── 生成推荐 ─────────────────────────────────────────
 
-    def _generate_recommendations(self, before_date: date, available_slots: int, available_cash: float) -> list:
-        """生成买入候选（T日收盘后生成，限价 = T日收盘价 × 1.01，T+1日开盘才成交）"""
+    def _generate_recommendations(self, trade_date: date, available_slots: int, available_cash: float) -> list:
+        """生成买入候选（T日收盘后生成，限价 = T日收盘价 × 1.01，T+1日开盘才成交）
+
+        Args:
+            trade_date: 生成推荐的交易日（T日），评分使用该日及之前的数据
+        """
         if available_slots <= 0:
             return []
 
@@ -225,9 +328,10 @@ class StrategyBacktest:
         stock_names = {s.code: s.name for s in db.query(Stock.code, Stock.name).all()}
         db.close()
 
+        score_as_of = trade_date + timedelta(days=1)
         scored = []
         for code in codes:
-            r = self._score_stock_for_date(code, before_date)
+            r = self._score_stock_for_date(code, score_as_of)
             if r:
                 scored.append(r)
         scored.sort(key=lambda x: x['total_score'], reverse=True)
@@ -236,11 +340,14 @@ class StrategyBacktest:
         for s in scored:
             if len(recs) >= available_slots:
                 break
+            # 自适应门槛过滤：低于门槛的股票直接跳过（已降序，遇到第一个即可终止）
+            if s['total_score'] < self._adaptive_score_threshold:
+                break
             close = s['latest_close']
             if not close or close <= 0:
                 continue
             limit_price = round(close * 1.01, 2)
-            alloc = available_cash * self.position_ratio
+            alloc = available_cash * self._adaptive_position_ratio
             if alloc < limit_price * 100:
                 continue
             recs.append({
@@ -250,6 +357,7 @@ class StrategyBacktest:
                 'factor_scores': s['factor_scores'],
                 'limit_price': limit_price,
                 'prev_close': close,
+                'position_ratio': self._adaptive_position_ratio,
             })
         return recs
 
@@ -288,8 +396,8 @@ class StrategyBacktest:
             if stock.open > rec['limit_price']:
                 continue
             buy_price = stock.open
-            # 可分配资金 = 可用现金 × 仓位比例
-            alloc = available_cash * self.position_ratio
+            # 可分配资金 = 可用现金 × 仓位比例（用生成日的自适应比例）
+            alloc = available_cash * rec.get('position_ratio', self.position_ratio)
             # 计算可买股数（必须是 100 的整数倍）
             quantity = int(alloc / buy_price) // 100 * 100
             if quantity < 100:
@@ -359,6 +467,11 @@ class StrategyBacktest:
 
         for day in trading_days:
             day_data = self._get_stock_data_for_date(day)
+
+            # 自适应参数更新：根据截至昨日的收益进度调整门槛和仓位
+            tier = self._update_adaptive_params()
+            progress, annualized, _ = self._compute_progress()
+
             available_cash = backtest_service.get_cash_balance()
 
             # 1. 检测卖出
@@ -425,7 +538,126 @@ class StrategyBacktest:
                 'cash': round(cash, 2),
                 'positions_value': round(positions_value, 2),
                 'positions_count': len(positions),
+                'tier': tier,
+                'progress': round(progress, 4),
+                'annualized': round(annualized, 4),
+                'score_threshold': round(self._adaptive_score_threshold, 2),
+                'position_ratio': round(self._adaptive_position_ratio, 2),
             })
+
+        # ─── 清仓阶段：结束日后继续运行卖出策略，不买入，直到持仓清空 ──
+        positions = self._get_db_positions()
+        if positions:
+            # 获取结束日之后的交易日（最多再跑30个交易日用于清仓）
+            db = next(get_db())
+            post_days = [
+                row[0] for row in
+                db.query(StockDaily.date)
+                .filter(StockDaily.date > self.end_date)
+                .distinct()
+                .order_by(StockDaily.date)
+                .limit(30)
+                .all()
+            ]
+            db.close()
+
+            for day in post_days:
+                day_data = self._get_stock_data_for_date(day)
+                sell_items = self._check_sell_for_day(day, day_data)
+                for item in sell_items:
+                    stock = day_data.get(item['code'])
+                    backtest_service.add_transaction(
+                        tx_type='sell',
+                        code=item['code'],
+                        quantity=item['quantity'],
+                        price=item['sell_price'],
+                        trade_date=day.strftime('%Y-%m-%d'),
+                        open_price=stock.open if stock else None,
+                        close_price=stock.close if stock else None,
+                    )
+                    amount = round(item['sell_price'] * item['quantity'], 2)
+                    backtest_service.update_cash(amount)
+                    equity_after = self._calc_equity(day_data)
+                    db = next(get_db())
+                    tx = db.query(BacktestTransaction).order_by(BacktestTransaction.id.desc()).first()
+                    if tx:
+                        tx.equity_after = equity_after
+                        db.commit()
+                    db.close()
+
+                    profit_pct = round(
+                        (item['sell_price'] - item['cost_price']) / item['cost_price'] * 100, 2
+                    )
+                    sell_log.append({
+                        'code': item['code'],
+                        'buy_price': item['cost_price'],
+                        'sell_price': item['sell_price'],
+                        'profit_pct': profit_pct,
+                        'date': day.strftime('%Y-%m-%d'),
+                        'reason': item['reason'],
+                    })
+
+                # 记录当日权益
+                positions = self._get_db_positions()
+                cash = backtest_service.get_cash_balance()
+                positions_value = 0.0
+                for pos in positions:
+                    stock = day_data.get(pos['code'])
+                    if stock:
+                        positions_value += stock.close * pos['quantity']
+
+                self.daily_records.append({
+                    'date': day.strftime('%Y-%m-%d'),
+                    'equity': round(cash + positions_value, 2),
+                    'cash': round(cash, 2),
+                    'positions_value': round(positions_value, 2),
+                    'positions_count': len(positions),
+                })
+
+                if not positions:
+                    break
+
+            # 如果跑完后续数据还有持仓，以最后可用日收盘价强制清仓
+            positions = self._get_db_positions()
+            if positions:
+                last_day = post_days[-1] if post_days else trading_days[-1]
+                last_day_data = self._get_stock_data_for_date(last_day)
+                for pos in positions:
+                    stock = last_day_data.get(pos['code'])
+                    sell_price = stock.close if stock else pos['cost_price']
+                    backtest_service.add_transaction(
+                        tx_type='sell',
+                        code=pos['code'],
+                        quantity=pos['quantity'],
+                        price=sell_price,
+                        trade_date=last_day.strftime('%Y-%m-%d'),
+                        open_price=stock.open if stock else None,
+                        close_price=stock.close if stock else None,
+                    )
+                    amount = round(sell_price * pos['quantity'], 2)
+                    backtest_service.update_cash(amount)
+
+                    profit_pct = round(
+                        (sell_price - pos['cost_price']) / pos['cost_price'] * 100, 2
+                    )
+                    sell_log.append({
+                        'code': pos['code'],
+                        'buy_price': pos['cost_price'],
+                        'sell_price': sell_price,
+                        'profit_pct': profit_pct,
+                        'date': last_day.strftime('%Y-%m-%d'),
+                        'reason': 'force_close',
+                    })
+
+                # 记录强制清仓后权益
+                cash = backtest_service.get_cash_balance()
+                self.daily_records.append({
+                    'date': last_day.strftime('%Y-%m-%d'),
+                    'equity': round(cash, 2),
+                    'cash': round(cash, 2),
+                    'positions_value': 0.0,
+                    'positions_count': 0,
+                })
 
         return self._build_summary(sell_log)
 
@@ -440,7 +672,30 @@ class StrategyBacktest:
             (final_equity - self.initial_capital) / self.initial_capital * 100, 2
         )
         total_days = len(self.daily_records)
-        annualized = round(total_return_pct / (total_days / 252), 2) if total_days > 0 else 0
+
+        # CAGR 年化收益率（与自适应调整口径一致）
+        if total_days > 0 and final_equity > 0:
+            annualized = ((final_equity / self.initial_capital) ** (252 / total_days) - 1) * 100
+        else:
+            annualized = 0.0
+        annualized = round(annualized, 2)
+
+        # 最大回撤
+        max_drawdown = 0.0
+        peak = 0.0
+        for record in self.daily_records:
+            eq = record['equity']
+            if eq > peak:
+                peak = eq
+            if peak > 0:
+                dd = (peak - eq) / peak * 100
+                if dd > max_drawdown:
+                    max_drawdown = dd
+        max_drawdown = round(max_drawdown, 2)
+
+        # 最终进度
+        final_progress, _, _ = self._compute_progress()
+        final_progress = round(final_progress, 4)
 
         return {
             'summary': {
@@ -450,6 +705,10 @@ class StrategyBacktest:
                 'final_equity': round(final_equity, 2),
                 'total_return_pct': total_return_pct,
                 'annualized_return': annualized,
+                'max_drawdown': max_drawdown,
+                'target_annual_return': round(self.target_annual_return * 100, 2),
+                'final_progress': final_progress,
+                'final_tier': self._current_tier,
                 'total_trades': total_count,
                 'win_trades': win_count,
                 'lose_trades': lose_count,

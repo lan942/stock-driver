@@ -848,6 +848,7 @@ def strategy_backtest():
         stop_loss_pct=data.get('stop_loss_pct'),
         max_hold_days=data.get('max_hold_days'),
         position_ratio=data.get('position_ratio'),
+        strategy_type=data.get('strategy_type'),
     )
 
     result = backtest.run()
