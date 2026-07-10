@@ -23,6 +23,7 @@ from backend.services.portfolio_service import (
     update_holding,
     delete_holding,
     get_transactions,
+    get_transactions_by_code,
     add_transaction,
     clear_all_transactions,
     update_cash_balance,
@@ -34,6 +35,7 @@ from backend.services.backtest_service import (
     update_holding as backtest_update_holding,
     delete_holding as backtest_delete_holding,
     get_transactions as backtest_get_transactions,
+    get_transactions_by_code as backtest_get_transactions_by_code,
     add_transaction as backtest_add_transaction,
     clear_all_transactions as backtest_clear_transactions,
     update_cash as backtest_update_cash,
@@ -190,6 +192,18 @@ def get_stock(code):
         'pe': latest.pe if latest else None,
         'pb': latest.pb if latest else None,
         'market_cap': latest.market_cap if latest else None,
+    })
+
+
+@api.route('/stocks/<code>/transactions', methods=['GET'])
+def get_stock_transactions(code):
+    """获取股票的回测和实盘交易记录"""
+    backtest_tx = backtest_get_transactions_by_code(code)
+    portfolio_tx = get_transactions_by_code(code)
+
+    return jsonify({
+        'backtest': backtest_tx,
+        'portfolio': portfolio_tx,
     })
 
 

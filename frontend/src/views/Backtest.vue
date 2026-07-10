@@ -47,8 +47,20 @@
         </div>
       </template>
       <el-table :data="holdings" border style="width: 100%" fit>
-        <el-table-column prop="code" label="股票代码" width="100" />
-        <el-table-column prop="name" label="股票名称" min-width="120" />
+        <el-table-column prop="code" label="股票代码" width="100">
+          <template #default="{ row }">
+            <a :href="`/stock/${row.code}`" target="_blank" class="stock-link">
+              {{ row.code }}
+            </a>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="股票名称" min-width="120">
+          <template #default="{ row }">
+            <a :href="`/stock/${row.code}`" target="_blank" class="stock-link">
+              {{ row.name }}
+            </a>
+          </template>
+        </el-table-column>
         <el-table-column prop="quantity" label="持仓数量" width="100" align="center">
           <template #default="{ row }">
             {{ row.quantity.toLocaleString() }} 股
@@ -124,8 +136,20 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="code" label="股票代码" width="100" />
-        <el-table-column prop="name" label="股票名称" width="120" />
+        <el-table-column prop="code" label="股票代码" width="100">
+          <template #default="{ row }">
+            <a :href="`/stock/${row.code}`" target="_blank" class="stock-link">
+              {{ row.code }}
+            </a>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="股票名称" width="120">
+          <template #default="{ row }">
+            <a :href="`/stock/${row.code}`" target="_blank" class="stock-link">
+              {{ row.name }}
+            </a>
+          </template>
+        </el-table-column>
         <el-table-column prop="quantity" label="数量" width="90">
           <template #default="{ row }">
             {{ row.quantity.toLocaleString() }} 股
@@ -744,6 +768,17 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   gap: 8px;
+}
+
+.stock-link {
+  color: #409eff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.stock-link:hover {
+  color: #66b1ff;
+  text-decoration: underline;
 }
 
 @media (max-width: 1200px) {

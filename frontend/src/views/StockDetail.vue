@@ -58,6 +58,17 @@
         <el-checkbox v-model="showMA60" @change="renderChart">MA60</el-checkbox>
         <el-checkbox v-model="showBOLL" @change="renderChart">布林带</el-checkbox>
       </div>
+      <div class="overlay-controls">
+        <span class="overlay-label">交易标记:</span>
+        <el-checkbox v-model="showBacktestMarks" @change="renderChart">
+          <span style="color:#22c55e">▲回测买入</span>
+          <span style="color:#ef4444">▼回测卖出</span>
+        </el-checkbox>
+        <el-checkbox v-model="showPortfolioMarks" @change="renderChart">
+          <span style="color:#3b82f6">▲实盘买入</span>
+          <span style="color:#f59e0b">▼实盘卖出</span>
+        </el-checkbox>
+      </div>
       <div ref="chartRef" class="chart"></div>
     </div>
 
@@ -109,6 +120,13 @@ const showMA10 = ref(true)
 const showMA20 = ref(true)
 const showMA60 = ref(false)
 const showBOLL = ref(false)
+
+// 交易标记开关
+const showBacktestMarks = ref(true)
+const showPortfolioMarks = ref(true)
+
+// 交易数据
+const transactions = ref({ backtest: [], portfolio: [] })
 
 let chartInstance = null
 
@@ -172,6 +190,16 @@ const loadStockInfo = async () => {
   }
 }
 
+const loadTransactions = async () => {
+  try {
+    const response = await stockAPI.getStockTransactions(route.params.code)
+    transactions.value = response.data
+  } catch (error) {
+    console.error('加载交易记录失败:', error)
+    transactions.value = { backtest: [], portfolio: [] }
+  }
+}
+
 const loadAll = async () => {
   loading.value = true
   try {
@@ -183,6 +211,7 @@ const loadAll = async () => {
     )
     indicatorData.value = response.data
     tableData.value = buildTableData(response.data)
+    await loadTransactions()
     await nextTick()
     renderChart()
   } catch (error) {
@@ -205,8 +234,9 @@ const renderChart = () => {
   const dates = data.dates || []
   const prices = data.prices || {}
   const closeArr = prices.close || []
+  const highArr = prices.high || []
+  const lowArr = prices.low || []
 
-  // 构建 K 线数据 [open, close, low, high]
   const klineData = dates.map((_, i) => [
     prices.open?.[i] ?? 0,
     prices.close?.[i] ?? 0,
@@ -218,6 +248,8 @@ const renderChart = () => {
   const ma10 = calcSMA(closeArr, 10)
   const ma20 = calcSMA(closeArr, 20)
   const ma60 = calcSMA(closeArr, 60)
+
+  
 
   const series = [
     {
@@ -253,13 +285,69 @@ const renderChart = () => {
   if (showMA20.value) addMALine('MA20', ma20, maColors.MA20)
   if (showMA60.value) addMALine('MA60', ma60, maColors.MA60)
 
-  // 布林带
   if (showBOLL.value && data.indicators?.boll) {
     const boll = data.indicators.boll
     const bollStyle = { width: 1, opacity: 0.5 }
     if (boll.upper) series.push({ name: 'BOLL上轨', type: 'line', data: boll.upper, lineStyle: { ...bollStyle, color: '#FF5722', type: 'dashed' }, symbol: 'none' })
     if (boll.mid) series.push({ name: 'BOLL中轨', type: 'line', data: boll.mid, lineStyle: { ...bollStyle, color: '#607D8B' }, symbol: 'none' })
     if (boll.lower) series.push({ name: 'BOLL下轨', type: 'line', data: boll.lower, lineStyle: { ...bollStyle, color: '#FF5722', type: 'dashed' }, symbol: 'none' })
+  }
+
+  const dateIndexMap = {}
+  dates.forEach((d, i) => { dateIndexMap[d] = i })
+
+  const addTransactionMarks = (txList, name, buyColor, sellColor) => {
+    const buyData = []
+    const sellData = []
+    txList.forEach(tx => {
+      const idx = dateIndexMap[tx.trade_date]
+      if (idx !== undefined) {
+        if (tx.type === 'buy') {
+          buyData.push([idx, tx.price, tx.quantity])
+        } else if (tx.type === 'sell') {
+          sellData.push([idx, tx.price, tx.quantity])
+        }
+      }
+    })
+
+    if (buyData.length > 0) {
+      series.push({
+        name: `${name}买入`,
+        type: 'scatter',
+        data: buyData.map(([idx, price, qty]) => ({
+          value: [idx, price],
+          extra: { quantity: qty, price: price }
+        })),
+        symbol: 'triangle',
+        symbolSize: 18,
+        itemStyle: { color: buyColor },
+        zlevel: 5,
+      })
+    }
+
+    if (sellData.length > 0) {
+      series.push({
+        name: `${name}卖出`,
+        type: 'scatter',
+        data: sellData.map(([idx, price, qty]) => ({
+          value: [idx, price],
+          extra: { quantity: qty, price: price }
+        })),
+        symbol: 'triangle',
+        symbolRotate: 180,
+        symbolSize: 18,
+        itemStyle: { color: sellColor },
+        zlevel: 5,
+      })
+    }
+  }
+
+  if (showBacktestMarks.value && transactions.value.backtest.length > 0) {
+    addTransactionMarks(transactions.value.backtest, '回测', '#22c55e', '#ef4444')
+  }
+
+  if (showPortfolioMarks.value && transactions.value.portfolio.length > 0) {
+    addTransactionMarks(transactions.value.portfolio, '实盘', '#3b82f6', '#f59e0b')
   }
 
   const option = {
@@ -279,7 +367,6 @@ const renderChart = () => {
   }
 
   chartInstance.setOption(option)
-  // 强制重绘适应容器宽度
   chartInstance.resize()
 }
 

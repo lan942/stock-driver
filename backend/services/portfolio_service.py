@@ -214,6 +214,36 @@ def delete_holding(holding_id: int) -> Dict[str, Any]:
     return {'success': True, 'message': '持仓已删除'}
 
 
+def get_transactions_by_code(code: str) -> List[Dict[str, Any]]:
+    """根据股票代码获取实盘交易记录"""
+    db = next(get_db())
+
+    transactions = db.query(Transaction).filter(
+        Transaction.code == code
+    ).order_by(
+        Transaction.trade_date.asc(),
+        Transaction.id.asc(),
+    ).all()
+
+    result = []
+    for tx in transactions:
+        stock = db.query(Stock).filter(Stock.code == tx.code).first()
+        stock_name = stock.name if stock else tx.code
+
+        result.append({
+            'id': tx.id,
+            'type': tx.type,
+            'code': tx.code,
+            'name': stock_name,
+            'quantity': tx.quantity,
+            'price': round(tx.price, 2),
+            'trade_date': tx.trade_date.strftime('%Y-%m-%d') if tx.trade_date else '',
+        })
+
+    db.close()
+    return result
+
+
 def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
     """获取交易记录列表"""
     db = next(get_db())

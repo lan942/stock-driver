@@ -21,6 +21,9 @@ export const stockAPI = {
     if (params) queryParams.params = params
     return api.get(`/stocks/${code}/indicators`, { params: queryParams })
   },
+  getStockTransactions(code) {
+    return api.get(`/stocks/${code}/transactions`)
+  },
   getTopGainers(limit = 10, date = null) {
     const params = { limit }
     if (date) params.date = date
