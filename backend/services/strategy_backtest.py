@@ -55,6 +55,11 @@ class StrategyBacktest:
         self.strategy_type = strategy_type or StrategyConfigService.get('strategy_type') or 'xgboost'
         self.strategy = get_strategy(self.strategy_type)
 
+        # ATR 参数
+        self.atr_period = int(StrategyConfigService.get('atr_period') or 14)
+        self.atr_profit_multiplier = float(StrategyConfigService.get('atr_profit_multiplier') or 2.0)
+        self.atr_loss_multiplier = float(StrategyConfigService.get('atr_loss_multiplier') or 1.0)
+
         # 自适应参数：根据收益进度动态调整选股门槛和仓位
         self.target_annual_return = float(
             StrategyConfigService.get('target_annual_return') or 0.15
@@ -198,6 +203,51 @@ class StrategyBacktest:
 
         return self.strategy.score_from_data(code, data)
 
+    def _calculate_atr(self, code: str, before_date: date) -> Optional[float]:
+        """计算指定日期之前的 ATR 值
+        
+        Args:
+            code: 股票代码
+            before_date: 计算截止日期（不含）
+            
+        Returns:
+            ATR值，数据不足时返回None
+        """
+        db = next(get_db())
+        rows = (
+            db.query(StockDaily)
+            .filter(StockDaily.code == code, StockDaily.date < before_date)
+            .order_by(StockDaily.date.desc())
+            .limit(self.atr_period + 1)
+            .all()
+        )
+        db.close()
+        
+        if len(rows) < self.atr_period + 1:
+            return None
+        
+        rows = list(reversed(rows))
+        
+        tr_values = []
+        for i in range(1, len(rows)):
+            curr = rows[i]
+            prev = rows[i-1]
+            
+            if not curr.high or not curr.low or not prev.close:
+                continue
+            
+            tr1 = curr.high - curr.low
+            tr2 = abs(curr.high - prev.close)
+            tr3 = abs(curr.low - prev.close)
+            
+            tr_values.append(max(tr1, tr2, tr3))
+        
+        if len(tr_values) < self.atr_period:
+            return None
+        
+        atr = sum(tr_values[-self.atr_period:]) / self.atr_period
+        return round(atr, 4)
+
     # ─── 持仓查询 ─────────────────────────────────────────
 
     @staticmethod
@@ -242,7 +292,18 @@ class StrategyBacktest:
     # ─── 卖出检测 ─────────────────────────────────────────
 
     def _check_sell_for_day(self, day: date, day_data: dict) -> list:
-        """检测当日持仓是否触发卖出（使用 high/low）"""
+        """检测当日持仓是否触发卖出（使用 high/low）
+        
+        卖出优先级（从高到低）：
+        1. 止损（配置止损比例 或 ATR止损，取较小值）
+        2. 止盈（配置止盈比例 或 ATR止盈，取较小值）
+        3. 超时（持仓天数达到上限）
+        
+        ATR止盈止损逻辑：
+        - ATR止盈：成本价 + N倍ATR，超过则卖出
+        - ATR止损：成本价 - N倍ATR，跌破则卖出
+        - 与配置的比例止盈止损取"先触发"的那个
+        """
         positions = self._get_db_positions()
         sold = []
 
@@ -258,13 +319,44 @@ class StrategyBacktest:
             sell_price = None
             reason = None
 
-            if stock.high and stock.high >= pos['cost_price'] * (1 + self.stop_profit_pct):
-                sell_price = round(pos['cost_price'] * (1 + self.stop_profit_pct), 2)
-                reason = 'sold'
-            elif stock.low and stock.low <= pos['cost_price'] * (1 - self.stop_loss_pct):
-                sell_price = round(pos['cost_price'] * (1 - self.stop_loss_pct), 2)
-                reason = 'sold'
-            elif hold_days >= self.max_hold_days:
+            atr = self._calculate_atr(pos['code'], day)
+
+            # 计算两种止盈阈值（取较小值，即更容易触发的）
+            profit_threshold_pct = pos['cost_price'] * (1 + self.stop_profit_pct)
+            profit_threshold_atr = None
+            if atr:
+                profit_threshold_atr = pos['cost_price'] + atr * self.atr_profit_multiplier
+
+            # 计算两种止损阈值（取较大值，即更容易触发的）
+            loss_threshold_pct = pos['cost_price'] * (1 - self.stop_loss_pct)
+            loss_threshold_atr = None
+            if atr:
+                loss_threshold_atr = pos['cost_price'] - atr * self.atr_loss_multiplier
+
+            # 1. 止损检测（最高优先级）
+            if stock.low:
+                # 配置比例止损
+                if stock.low <= loss_threshold_pct:
+                    sell_price = round(loss_threshold_pct, 2)
+                    reason = 'stop_loss'
+                # ATR止损（如果ATR可用且比配置止损更早触发）
+                elif atr and loss_threshold_atr and stock.low <= loss_threshold_atr:
+                    sell_price = round(loss_threshold_atr, 2)
+                    reason = 'atr_loss'
+
+            # 2. 止盈检测（第二优先级）
+            if sell_price is None and stock.high:
+                # 配置比例止盈
+                if stock.high >= profit_threshold_pct:
+                    sell_price = round(profit_threshold_pct, 2)
+                    reason = 'take_profit'
+                # ATR止盈（如果ATR可用且比配置止盈更早触发）
+                elif atr and profit_threshold_atr and stock.high >= profit_threshold_atr:
+                    sell_price = round(profit_threshold_atr, 2)
+                    reason = 'atr_profit'
+
+            # 3. 超时检测（第三优先级）
+            if sell_price is None and hold_days >= self.max_hold_days:
                 sell_price = stock.close
                 reason = 'timeout'
 

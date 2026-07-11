@@ -68,7 +68,7 @@ def build_features(
 
     # 按股票代码分组，独立计算特征（避免不同股票之间滚动窗口污染）
     if 'code' in df.columns:
-        result = df.groupby('code', group_keys=False).apply(_build_single_stock_features)
+        result = df.groupby('code', group_keys=False).apply(_build_single_stock_features, include_groups=False)
     else:
         result = _build_single_stock_features(df)
 
@@ -81,7 +81,7 @@ def build_features(
             # 按 code 分组后应用自定义特征函数
             for name, func in extra_features.items():
                 result[name] = df.groupby('code', group_keys=False).apply(
-                    lambda g: func(g).reindex(g.index)
+                    lambda g: func(g).reindex(g.index), include_groups=False
                 )
                 # 合并后 dropna 以处理自定义特征产生的 NaN
                 result = result.dropna(subset=[name])

@@ -11,8 +11,8 @@ DEFAULT_CONFIGS = {
     'initial_capital': {'value': '100000', 'description': '初始资金（元）'},
     'max_positions': {'value': '5', 'description': '最大同时持仓只数'},
     'position_ratio': {'value': '0.2', 'description': '单只仓位占可用资金比例'},
-    'stop_profit_pct': {'value': '0.06', 'description': '止盈比例'},
-    'stop_loss_pct': {'value': '0.03', 'description': '止损比例'},
+    'stop_profit_pct': {'value': '0.06', 'description': '止盈比例（底线）'},
+    'stop_loss_pct': {'value': '0.03', 'description': '止损比例（底线）'},
     'max_hold_days': {'value': '5', 'description': '最大持有天数'},
     'strategy_type': {'value': 'xgboost', 'description': '策略类型：xgboost'},
     'adaptive_score_threshold_behind': {'value': '0.50', 'description': '落后档选股最低分'},
@@ -22,6 +22,9 @@ DEFAULT_CONFIGS = {
     'adaptive_position_ratio_near': {'value': '0.15', 'description': '接近档单只仓位比例'},
     'adaptive_position_ratio_met': {'value': '0.20', 'description': '达标档单只仓位比例'},
     'adaptive_min_days': {'value': '20', 'description': '动态调整预热交易日数'},
+    'atr_period': {'value': '14', 'description': 'ATR计算周期'},
+    'atr_profit_multiplier': {'value': '2.0', 'description': 'ATR止盈倍数（涨超N倍ATR卖出）'},
+    'atr_loss_multiplier': {'value': '1.0', 'description': 'ATR止损倍数（跌超N倍ATR卖出）'},
 }
 
 
@@ -51,12 +54,13 @@ class StrategyConfigService:
         if key in ('target_annual_return', 'initial_capital', 'stop_profit_pct', 'stop_loss_pct',
                     'max_hold_days', 'position_ratio',
                     'adaptive_score_threshold_behind', 'adaptive_score_threshold_near', 'adaptive_score_threshold_met',
-                    'adaptive_position_ratio_behind', 'adaptive_position_ratio_near', 'adaptive_position_ratio_met'):
+                    'adaptive_position_ratio_behind', 'adaptive_position_ratio_near', 'adaptive_position_ratio_met',
+                    'atr_profit_multiplier', 'atr_loss_multiplier'):
             try:
                 return float(raw)
             except ValueError:
                 return raw
-        if key in ('max_positions', 'adaptive_min_days'):
+        if key in ('max_positions', 'adaptive_min_days', 'atr_period'):
             try:
                 return int(raw)
             except ValueError:
