@@ -1,0 +1,27 @@
+{
+  "feature_cols": [
+    "ret_1d",
+    "ret_5d",
+    "volatility_10d",
+    "vol_change_1d",
+    "bias_20d"
+  ],
+  "lookahead": 5,
+  "train_date_range": [
+    "2025-02-06",
+    "2026-06-24"
+  ],
+  "test_date_range": [
+    "2026-06-24",
+    "2026-07-01"
+  ],
+  "train_samples": 109592,
+  "test_samples": 27398,
+  "train_accuracy": 0.5096,
+  "label_positive_ratio": 0.3396,
+  "trained_at": "2026-07-11T18:00:19.351082",
+  "gpu_used": true,
+  "n_estimators": 500,
+  "max_depth": 5,
+  "learning_rate": 0.05
+}

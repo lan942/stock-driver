@@ -8,7 +8,11 @@ import subprocess
 import time
 import os
 import shutil
+import sys
 from datetime import datetime
+
+# 添加本地 libs 目录到 Python 路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'libs'))
 
 try:
     import requests
@@ -331,6 +335,43 @@ def db_migrate(args):
         exit(1)
 
 
+def cmd_train_xgboost(args):
+    """训练 XGBoost ML 模型"""
+    lookahead = args.lookahead
+
+    print(blue(f"🚀 开始训练 XGBoost 模型 (lookahead={lookahead})..."))
+    print_separator()
+
+    try:
+        from backend.services.ml.xgboost_trainer import train_model
+
+        result = train_model(lookahead=lookahead)
+
+        if 'error' in result:
+            print(red(f"❌ 训练失败: {result['error']}"))
+        else:
+            print_separator()
+            print(green(f"✅ 训练完成"))
+            print(gray(f"训练样本: {result['train_samples']}"))
+            print(gray(f"测试样本: {result['test_samples']}"))
+            print(gray(f"测试准确率: {result['train_accuracy']}"))
+            print(gray(f"标签正样本率: {result['label_positive_ratio']}"))
+            print(gray(f"GPU加速: {'是' if result['gpu_used'] else '否'}"))
+            print(gray(f"特征列: {result['feature_cols']}"))
+            print(gray(f"模型路径: {result['model_path']}"))
+
+            if result.get('feature_importances'):
+                print()
+                print(blue("🔍 特征重要性:"))
+                for name, val in result['feature_importances'].items():
+                    bar = "█" * int(val * 50) + f" {val:.4f}"
+                    print(f"  {name:<20} {bar}")
+    except Exception as e:
+        print(red(f"❌ 训练异常: {e}"))
+        import traceback
+        traceback.print_exc()
+
+
 def db_backup(args):
     """备份数据库"""
     print(blue("备份数据库..."))
@@ -367,6 +408,8 @@ def main():
   python manage.py crawler realtime --force   # 强制爬取实时行情
   python manage.py crawler daily --start-date 20260701 --end-date 20260703
   python manage.py crawler status --limit 20  # 查询最近20条爬取记录
+  python manage.py train-xgboost              # 训练 XGBoost ML 模型
+  python manage.py train-xgboost --lookahead 3  # 指定预测窗口
   python manage.py db migrate                # 初始化数据库表结构
   python manage.py db backup                 # 备份数据库
         """,
@@ -414,6 +457,12 @@ def main():
 
     db_backup_parser = db_subparsers.add_parser("backup", help="备份数据库")
     db_backup_parser.set_defaults(func=db_backup)
+
+    # train-xgboost 命令
+    train_parser = subparsers.add_parser("train-xgboost", help="训练 XGBoost ML 模型")
+    train_parser.add_argument("--lookahead", type=int, default=5,
+                              help="预测窗口（未来 N 个交易日），默认 5")
+    train_parser.set_defaults(func=cmd_train_xgboost)
 
     args = parser.parse_args()
 

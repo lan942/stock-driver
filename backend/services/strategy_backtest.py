@@ -223,6 +223,10 @@ class StrategyBacktest:
         if hasattr(self.strategy, '_factor_macd_cross'):
             factor_scores['macd_cross'] = self.strategy._factor_macd_cross(data)
 
+        # ML 策略 fallback：如果没有因子方法，委托策略自己评分
+        if not factor_scores and hasattr(self.strategy, 'score_from_data'):
+            return self.strategy.score_from_data(code, data)
+
         total_score = sum(factor_scores[n] * weights.get(n, 0) for n in factor_scores)
         return {
             'code': code,

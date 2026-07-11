@@ -46,3 +46,6 @@ Thumbs.db
 # Build artifacts
 *.egg-info/
 .eggs/
+
+# Local pip packages
+libs/

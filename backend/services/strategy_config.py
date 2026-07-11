@@ -14,7 +14,7 @@ DEFAULT_CONFIGS = {
     'stop_profit_pct': {'value': '0.06', 'description': '止盈比例'},
     'stop_loss_pct': {'value': '0.03', 'description': '止损比例'},
     'max_hold_days': {'value': '5', 'description': '最大持有天数'},
-    'strategy_type': {'value': 'breakout', 'description': '策略类型：trend_following/mean_reversion/breakout'},
+    'strategy_type': {'value': 'xgboost', 'description': '策略类型：trend_following/mean_reversion/breakout/xgboost'},
     'adaptive_score_threshold_behind': {'value': '0.50', 'description': '落后档选股最低分'},
     'adaptive_score_threshold_near': {'value': '0.35', 'description': '接近档选股最低分'},
     'adaptive_score_threshold_met': {'value': '0.15', 'description': '达标档选股最低分'},
