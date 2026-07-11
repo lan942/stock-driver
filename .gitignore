@@ -8,11 +8,11 @@ venv/
 env/
 .venv/
 
-# Database (included in git for deployment)
-# *.db
-# *.db.*
-# *.sqlite
-# *.sqlite3
+# Database (too large for git, use LFS separately)
+*.db
+*.db.*
+*.sqlite
+*.sqlite3
 
 # Frontend
 node_modules/
