@@ -52,7 +52,7 @@ class StrategyBacktest:
         self.position_ratio = position_ratio or float(
             StrategyConfigService.get('position_ratio') or 0.2
         )
-        self.strategy_type = strategy_type or StrategyConfigService.get('strategy_type') or 'trend_following'
+        self.strategy_type = strategy_type or StrategyConfigService.get('strategy_type') or 'xgboost'
         self.strategy = get_strategy(self.strategy_type)
 
         # 自适应参数：根据收益进度动态调整选股门槛和仓位
@@ -196,44 +196,7 @@ class StrategyBacktest:
         if self.strategy._is_limit_up_down(data['latest']):
             return None
 
-        weights = self.strategy.DEFAULT_WEIGHTS
-        factor_scores = {}
-        if hasattr(self.strategy, '_factor_trend'):
-            factor_scores['trend'] = self.strategy._factor_trend(data)
-        if hasattr(self.strategy, '_factor_momentum'):
-            factor_scores['momentum'] = self.strategy._factor_momentum(data)
-        if hasattr(self.strategy, '_factor_volume'):
-            factor_scores['volume'] = self.strategy._factor_volume(data)
-        if hasattr(self.strategy, '_factor_reversal'):
-            factor_scores['reversal'] = self.strategy._factor_reversal(data)
-        if hasattr(self.strategy, '_factor_volatility'):
-            factor_scores['volatility'] = self.strategy._factor_volatility(data)
-        if hasattr(self.strategy, '_factor_bollinger'):
-            factor_scores['bollinger'] = self.strategy._factor_bollinger(data)
-        if hasattr(self.strategy, '_factor_rsi'):
-            factor_scores['rsi'] = self.strategy._factor_rsi(data)
-        if hasattr(self.strategy, '_factor_oversold'):
-            factor_scores['oversold'] = self.strategy._factor_oversold(data)
-        if hasattr(self.strategy, '_factor_stabilization'):
-            factor_scores['stabilization'] = self.strategy._factor_stabilization(data)
-        if hasattr(self.strategy, '_factor_breakout'):
-            factor_scores['breakout'] = self.strategy._factor_breakout(data)
-        if hasattr(self.strategy, '_factor_volume_confirm'):
-            factor_scores['volume_confirm'] = self.strategy._factor_volume_confirm(data)
-        if hasattr(self.strategy, '_factor_macd_cross'):
-            factor_scores['macd_cross'] = self.strategy._factor_macd_cross(data)
-
-        # ML 策略 fallback：如果没有因子方法，委托策略自己评分
-        if not factor_scores and hasattr(self.strategy, 'score_from_data'):
-            return self.strategy.score_from_data(code, data)
-
-        total_score = sum(factor_scores[n] * weights.get(n, 0) for n in factor_scores)
-        return {
-            'code': code,
-            'total_score': round(total_score, 4),
-            'factor_scores': {k: round(v, 4) for k, v in factor_scores.items()},
-            'latest_close': data['latest'].close,
-        }
+        return self.strategy.score_from_data(code, data)
 
     # ─── 持仓查询 ─────────────────────────────────────────
 
@@ -482,6 +445,9 @@ class StrategyBacktest:
             sell_items = self._check_sell_for_day(day, day_data)
             for item in sell_items:
                 stock = day_data.get(item['code'])
+                profit_pct = round(
+                    (item['sell_price'] - item['cost_price']) / item['cost_price'] * 100, 2
+                )
                 backtest_service.add_transaction(
                     tx_type='sell',
                     code=item['code'],
@@ -490,10 +456,10 @@ class StrategyBacktest:
                     trade_date=day.strftime('%Y-%m-%d'),
                     open_price=stock.open if stock else None,
                     close_price=stock.close if stock else None,
+                    profit_pct=profit_pct,
                 )
                 amount = round(item['sell_price'] * item['quantity'], 2)
                 backtest_service.update_cash(amount)
-                # 卖出后计算权益并更新交易记录
                 equity_after = self._calc_equity(day_data)
                 db = next(get_db())
                 tx = db.query(BacktestTransaction).order_by(BacktestTransaction.id.desc()).first()
@@ -502,9 +468,6 @@ class StrategyBacktest:
                     db.commit()
                 db.close()
 
-                profit_pct = round(
-                    (item['sell_price'] - item['cost_price']) / item['cost_price'] * 100, 2
-                )
                 sell_log.append({
                     'code': item['code'],
                     'buy_price': item['cost_price'],
@@ -570,6 +533,9 @@ class StrategyBacktest:
                 sell_items = self._check_sell_for_day(day, day_data)
                 for item in sell_items:
                     stock = day_data.get(item['code'])
+                    profit_pct = round(
+                        (item['sell_price'] - item['cost_price']) / item['cost_price'] * 100, 2
+                    )
                     backtest_service.add_transaction(
                         tx_type='sell',
                         code=item['code'],
@@ -578,6 +544,7 @@ class StrategyBacktest:
                         trade_date=day.strftime('%Y-%m-%d'),
                         open_price=stock.open if stock else None,
                         close_price=stock.close if stock else None,
+                        profit_pct=profit_pct,
                     )
                     amount = round(item['sell_price'] * item['quantity'], 2)
                     backtest_service.update_cash(amount)
@@ -589,9 +556,6 @@ class StrategyBacktest:
                         db.commit()
                     db.close()
 
-                    profit_pct = round(
-                        (item['sell_price'] - item['cost_price']) / item['cost_price'] * 100, 2
-                    )
                     sell_log.append({
                         'code': item['code'],
                         'buy_price': item['cost_price'],
@@ -629,6 +593,9 @@ class StrategyBacktest:
                 for pos in positions:
                     stock = last_day_data.get(pos['code'])
                     sell_price = stock.close if stock else pos['cost_price']
+                    profit_pct = round(
+                        (sell_price - pos['cost_price']) / pos['cost_price'] * 100, 2
+                    )
                     backtest_service.add_transaction(
                         tx_type='sell',
                         code=pos['code'],
@@ -637,13 +604,11 @@ class StrategyBacktest:
                         trade_date=last_day.strftime('%Y-%m-%d'),
                         open_price=stock.open if stock else None,
                         close_price=stock.close if stock else None,
+                        profit_pct=profit_pct,
                     )
                     amount = round(sell_price * pos['quantity'], 2)
                     backtest_service.update_cash(amount)
 
-                    profit_pct = round(
-                        (sell_price - pos['cost_price']) / pos['cost_price'] * 100, 2
-                    )
                     sell_log.append({
                         'code': pos['code'],
                         'buy_price': pos['cost_price'],

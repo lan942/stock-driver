@@ -123,10 +123,9 @@ const showBOLL = ref(false)
 
 // 交易标记开关
 const showBacktestMarks = ref(true)
-const showPortfolioMarks = ref(true)
 
 // 交易数据
-const transactions = ref({ backtest: [], portfolio: [] })
+const transactions = ref({ backtest: [] })
 
 let chartInstance = null
 
@@ -196,7 +195,7 @@ const loadTransactions = async () => {
     transactions.value = response.data
   } catch (error) {
     console.error('加载交易记录失败:', error)
-    transactions.value = { backtest: [], portfolio: [] }
+    transactions.value = { backtest: [] }
   }
 }
 
@@ -344,10 +343,6 @@ const renderChart = () => {
 
   if (showBacktestMarks.value && transactions.value.backtest.length > 0) {
     addTransactionMarks(transactions.value.backtest, '回测', '#22c55e', '#ef4444')
-  }
-
-  if (showPortfolioMarks.value && transactions.value.portfolio.length > 0) {
-    addTransactionMarks(transactions.value.portfolio, '实盘', '#3b82f6', '#f59e0b')
   }
 
   const option = {

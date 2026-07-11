@@ -4,16 +4,10 @@
 """
 
 from .base_strategy import IStrategy
-from .trend_following_strategy import TrendFollowingStrategy
-from .mean_reversion_strategy import MeanReversionStrategy
-from .breakout_strategy import BreakoutStrategy
 from .ml_strategy import XGBoostStrategy
 
 
 STRATEGY_REGISTRY = {
-    'trend_following': TrendFollowingStrategy,
-    'mean_reversion': MeanReversionStrategy,
-    'breakout': BreakoutStrategy,
     'xgboost': XGBoostStrategy,
 }
 

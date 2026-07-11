@@ -16,18 +16,6 @@ from backend.services.stock_service import (
     record_crawl_status,
     get_daily_summary,
 )
-from backend.services.portfolio_service import (
-    get_portfolio_overview,
-    get_holdings,
-    add_holding,
-    update_holding,
-    delete_holding,
-    get_transactions,
-    get_transactions_by_code,
-    add_transaction,
-    clear_all_transactions,
-    update_cash_balance,
-)
 from backend.services.backtest_service import (
     get_portfolio_overview as backtest_get_overview,
     get_holdings as backtest_get_holdings,
@@ -41,7 +29,6 @@ from backend.services.backtest_service import (
     update_cash as backtest_update_cash,
 )
 from backend.services.strategy_config import StrategyConfigService
-from backend.services.position_manager import PositionManager
 from backend.services.strategy_engine import StrategyEngine
 from backend.services.strategy_backtest import StrategyBacktest
 
@@ -499,97 +486,6 @@ def get_daily_progress():
     return jsonify(progress)
 
 
-@api.route('/portfolio/overview', methods=['GET'])
-def portfolio_overview():
-    overview = get_portfolio_overview()
-    return jsonify(overview)
-
-
-@api.route('/portfolio/holdings', methods=['GET'])
-def portfolio_holdings():
-    holdings = get_holdings()
-    return jsonify(holdings)
-
-
-@api.route('/portfolio/holdings', methods=['POST'])
-def portfolio_add_holding():
-    data = request.get_json(silent=True) or {}
-    code = data.get('code')
-    quantity = data.get('quantity')
-    cost_price = data.get('cost_price')
-
-    if not code or quantity is None or cost_price is None:
-        return jsonify({'error': '缺少必要参数: code, quantity, cost_price'}), 400
-
-    result = add_holding(code, quantity, cost_price)
-    if 'error' in result:
-        return jsonify(result), 400
-    return jsonify(result), 201
-
-
-@api.route('/portfolio/holdings/<int:holding_id>', methods=['PUT'])
-def portfolio_update_holding(holding_id):
-    data = request.get_json(silent=True) or {}
-    quantity = data.get('quantity')
-    cost_price = data.get('cost_price')
-
-    result = update_holding(holding_id, quantity, cost_price)
-    if 'error' in result:
-        return jsonify(result), 400
-    return jsonify(result)
-
-
-@api.route('/portfolio/holdings/<int:holding_id>', methods=['DELETE'])
-def portfolio_delete_holding(holding_id):
-    result = delete_holding(holding_id)
-    if 'error' in result:
-        return jsonify(result), 400
-    return jsonify(result)
-
-
-@api.route('/portfolio/transactions', methods=['GET'])
-def portfolio_transactions():
-    limit = request.args.get('limit', 50, type=int)
-    transactions = get_transactions(limit)
-    return jsonify(transactions)
-
-
-@api.route('/portfolio/transactions', methods=['POST'])
-def portfolio_add_transaction():
-    data = request.get_json(silent=True) or {}
-    tx_type = data.get('type')
-    code = data.get('code')
-    quantity = data.get('quantity')
-    price = data.get('price')
-    trade_date = data.get('trade_date')
-
-    if not tx_type or not code or quantity is None or price is None:
-        return jsonify({'error': '缺少必要参数: type, code, quantity, price'}), 400
-
-    result = add_transaction(tx_type, code, quantity, price, trade_date)
-    if 'error' in result:
-        return jsonify(result), 400
-    return jsonify(result), 201
-
-
-@api.route('/portfolio/transactions', methods=['DELETE'])
-def portfolio_clear_transactions():
-    result = clear_all_transactions()
-    return jsonify(result)
-
-
-@api.route('/portfolio/cash', methods=['POST'])
-def portfolio_update_cash():
-    data = request.get_json(silent=True) or {}
-    amount = data.get('amount')
-
-    if amount is None:
-        return jsonify({'error': '缺少必要参数: amount'}), 400
-
-    result = update_cash_balance(amount)
-    return jsonify(result)
-
-
 @api.route('/backtest/overview', methods=['GET'])
 def backtest_overview():
     overview = backtest_get_overview()
@@ -707,11 +603,9 @@ def strategy_update_config():
 @api.route('/strategy/recommendations', methods=['GET'])
 def strategy_recommendations():
     """获取每日买入推荐"""
-    available_slots = PositionManager.get_available_slots()
-    available_cash = PositionManager.get_available_cash()
-
-    if available_slots <= 0:
-        return jsonify({'data': [], 'available_slots': 0, 'message': '持仓已满'})
+    max_positions = int(StrategyConfigService.get('max_positions') or 5)
+    available_slots = max_positions
+    available_cash = float(StrategyConfigService.get('initial_capital') or 100000)
 
     recommendations = StrategyEngine.generate_recommendations(available_slots, available_cash)
     return jsonify({
@@ -719,122 +613,6 @@ def strategy_recommendations():
         'available_slots': available_slots,
         'available_cash': available_cash,
     })
-
-
-@api.route('/strategy/positions', methods=['GET'])
-def strategy_positions():
-    """获取持仓列表"""
-    status = request.args.get('status', None)
-    positions = PositionManager.get_positions(status)
-    return jsonify({'data': positions})
-
-
-@api.route('/strategy/transactions', methods=['GET'])
-def strategy_transactions():
-    """分页获取交易记录"""
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 20, type=int)
-    code = request.args.get('code', None)
-    result = PositionManager.get_transactions(code=code, page=page, page_size=page_size)
-    return jsonify(result)
-
-
-@api.route('/strategy/stats', methods=['GET'])
-def strategy_stats():
-    """获取策略绩效统计"""
-    stats = PositionManager.get_stats()
-    return jsonify(stats)
-
-
-@api.route('/strategy/run', methods=['POST'])
-def strategy_run():
-    """手动触发策略执行"""
-    today = date.today()
-    data = request.get_json(silent=True) or {}
-    run_date_str = data.get('date')
-    if run_date_str:
-        today = datetime.strptime(run_date_str, '%Y-%m-%d').date()
-
-    # 1. 检测卖出条件
-    sell_result = PositionManager.check_sell_conditions(today)
-
-    # 2. 计算可用仓位
-    available_slots = PositionManager.get_available_slots()
-    available_cash = PositionManager.get_available_cash()
-
-    # 3. 生成推荐
-    recommendations = []
-    if available_slots > 0:
-        recommendations = StrategyEngine.generate_recommendations(available_slots, available_cash)
-
-    return jsonify({
-        'sold_count': len(sell_result['sold']),
-        'sold_details': sell_result['sold'],
-        'remaining_holding': sell_result['remaining_holding'],
-        'available_slots': available_slots,
-        'available_cash': available_cash,
-        'recommendations_count': len(recommendations),
-        'recommendations': recommendations,
-        'run_date': today.strftime('%Y-%m-%d'),
-    })
-
-
-@api.route('/strategy/execute', methods=['POST'])
-def strategy_execute():
-    """执行买入推荐：同步写入 portfolio 和 strategy 两套系统"""
-    data = request.get_json(silent=True) or {}
-    code = data.get('code')
-    name = data.get('name', '')
-    quantity = data.get('quantity')
-    buy_price = data.get('buy_price')
-    suggested_buy_price = data.get('suggested_buy_price', buy_price)
-    target_price = data.get('target_price')
-    stop_price = data.get('stop_price')
-    buy_date_str = data.get('buy_date')
-
-    if not code or not quantity or not buy_price or not target_price or not stop_price:
-        return jsonify({'error': '缺少必要参数: code, quantity, buy_price, target_price, stop_price'}), 400
-
-    if buy_date_str:
-        buy_date = datetime.strptime(buy_date_str, '%Y-%m-%d').date()
-    else:
-        buy_date = date.today()
-
-    result = PositionManager.execute_recommendation(
-        code=code,
-        name=name,
-        quantity=quantity,
-        buy_price=buy_price,
-        suggested_buy_price=suggested_buy_price,
-        target_price=target_price,
-        stop_price=stop_price,
-        buy_date=buy_date,
-    )
-    if 'error' in result:
-        return jsonify(result), 400
-    return jsonify(result), 201
-
-
-@api.route('/strategy/sell', methods=['POST'])
-def strategy_sell():
-    """手动卖出策略持仓：同步到 portfolio 系统"""
-    data = request.get_json(silent=True) or {}
-    position_id = data.get('position_id')
-    sell_price = data.get('sell_price')
-
-    if not position_id or not sell_price:
-        return jsonify({'error': '缺少必要参数: position_id, sell_price'}), 400
-
-    sell_date_str = data.get('sell_date')
-    if sell_date_str:
-        sell_date = datetime.strptime(sell_date_str, '%Y-%m-%d').date()
-    else:
-        sell_date = date.today()
-
-    result = PositionManager.close_position(position_id, sell_price, sell_date)
-    if 'error' in result:
-        return jsonify(result), 400
-    return jsonify(result)
 
 
 @api.route('/strategy/backtest', methods=['POST'])

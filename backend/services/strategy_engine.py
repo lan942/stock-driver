@@ -16,7 +16,7 @@ class StrategyEngine:
     @staticmethod
     def get_current_strategy():
         """获取当前配置的策略实例"""
-        strategy_name = StrategyConfigService.get('strategy_type') or 'breakout'
+        strategy_name = StrategyConfigService.get('strategy_type') or 'xgboost'
         return get_strategy(strategy_name)
 
     @staticmethod

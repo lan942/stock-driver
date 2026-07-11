@@ -180,6 +180,14 @@
             {{ row.equity_after !== null && row.equity_after !== undefined ? '¥' + formatNumber(row.equity_after) : '-' }}
           </template>
         </el-table-column>
+        <el-table-column prop="profit_pct" label="收益率" width="100" align="center">
+          <template #default="{ row }">
+            <span v-if="row.profit_pct !== null && row.profit_pct !== undefined" :class="{ 'profit-positive': row.profit_pct >= 0, 'profit-negative': row.profit_pct < 0 }">
+              {{ row.profit_pct >= 0 ? '+' : '' }}{{ row.profit_pct.toFixed(2) }}%
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="trade_date" label="交易日期" width="110">
           <template #default="{ row }">
             {{ row.trade_date || '-' }}

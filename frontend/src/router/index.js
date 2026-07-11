@@ -4,7 +4,6 @@ import StockDetail from '../views/StockDetail.vue'
 import TopStocks from '../views/TopStocks.vue'
 import Crawler from '../views/Crawler.vue'
 import DataSummary from '../views/DataSummary.vue'
-import Portfolio from '../views/Portfolio.vue'
 import Backtest from '../views/Backtest.vue'
 import StrategyBoard from '../views/StrategyBoard.vue'
 
@@ -33,11 +32,6 @@ const routes = [
     path: '/data-summary',
     name: 'DataSummary',
     component: DataSummary
-  },
-  {
-    path: '/portfolio',
-    name: 'Portfolio',
-    component: Portfolio
   },
   {
     path: '/backtest',

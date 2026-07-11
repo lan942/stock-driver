@@ -240,6 +240,7 @@ def get_transactions_by_code(code: str) -> List[Dict[str, Any]]:
             'trade_date': tx.trade_date.strftime('%Y-%m-%d') if tx.trade_date else '',
             'open_price': round(tx.open_price, 2) if tx.open_price is not None else None,
             'close_price': round(tx.close_price, 2) if tx.close_price is not None else None,
+            'profit_pct': round(tx.profit_pct, 2) if tx.profit_pct is not None else None,
         })
 
     db.close()
@@ -272,6 +273,7 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
             'open_price': round(tx.open_price, 2) if tx.open_price is not None else None,
             'close_price': round(tx.close_price, 2) if tx.close_price is not None else None,
             'equity_after': round(tx.equity_after, 2) if tx.equity_after is not None else None,
+            'profit_pct': round(tx.profit_pct, 2) if tx.profit_pct is not None else None,
             'created_at': tx.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
 
@@ -288,6 +290,7 @@ def add_transaction(
     open_price: Optional[float] = None,
     close_price: Optional[float] = None,
     equity_after: Optional[float] = None,
+    profit_pct: Optional[float] = None,
 ) -> Dict[str, Any]:
     """添加回测交易记录"""
     # 验证数量必须是100的整数倍
@@ -362,6 +365,7 @@ def add_transaction(
         open_price=open_price,
         close_price=close_price,
         equity_after=equity_after,
+        profit_pct=profit_pct,
     )
     db.add(transaction)
     db.commit()
@@ -381,6 +385,7 @@ def add_transaction(
         'open_price': round(transaction.open_price, 2) if transaction.open_price is not None else None,
         'close_price': round(transaction.close_price, 2) if transaction.close_price is not None else None,
         'equity_after': round(transaction.equity_after, 2) if transaction.equity_after is not None else None,
+        'profit_pct': round(transaction.profit_pct, 2) if transaction.profit_pct is not None else None,
         'created_at': transaction.created_at.strftime('%Y-%m-%d %H:%M:%S')
     }
 
