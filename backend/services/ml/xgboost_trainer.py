@@ -165,15 +165,15 @@ def _build_feature_label_dataframe(
     results = []
     for code, group in df.groupby('code'):
         try:
-            # 清洗停牌日（volume == 0），避免昨收盘填充的虚假数据污染 shift/rolling
-            group = group[group['volume'] > 0]
-            if group.empty:
-                continue
-            # 特征工程
+            group = group.copy()
+            suspension_mask = group['volume'] == 0
+            if suspension_mask.any():
+                group.loc[suspension_mask, ['open', 'high', 'low', 'close', 'volume']] = np.nan
+
             feats = build_features(group)
             if feats.empty:
                 continue
-            # 计算未来收益率（per-stock，剔除 T+1 一字板，不分配 label）
+
             with_returns = compute_future_returns(feats, lookahead=lookahead)
             if with_returns.empty:
                 continue
