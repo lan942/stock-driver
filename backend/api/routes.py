@@ -618,9 +618,11 @@ def strategy_recommendations():
 @api.route('/strategy/backtest', methods=['POST'])
 def strategy_backtest():
     """回测：在指定日期范围内按日迭代模拟策略"""
+    print('[API] 收到回测请求')
     data = request.get_json(silent=True) or {}
     start_date_str = data.get('start_date')
     end_date_str = data.get('end_date')
+    print(f'[API] 日期范围: {start_date_str} ~ {end_date_str}')
 
     if not start_date_str or not end_date_str:
         return jsonify({'error': '缺少必要参数: start_date, end_date'}), 400
@@ -631,6 +633,7 @@ def strategy_backtest():
     except ValueError:
         return jsonify({'error': '日期格式错误，应为 YYYY-MM-DD'}), 400
 
+    print(f'[API] 创建回测实例')
     backtest = StrategyBacktest(
         start_date=start_date,
         end_date=end_date,

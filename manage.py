@@ -111,7 +111,8 @@ def cmd_start(args):
     print()
 
     try:
-        cmd = ["py", "-m", "backend.app"]
+        py_exe = sys.executable  # 使用当前运行 manage.py 的 Python
+        cmd = [py_exe, "-m", "backend.app"]
         if debug:
             cmd.append("--debug")
         subprocess.run(cmd, check=True)

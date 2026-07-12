@@ -376,6 +376,9 @@ class StrategyBacktest:
     def _generate_recommendations(self, trade_date: date, available_slots: int, available_cash: float) -> list:
         """生成买入候选（T日收盘后生成，限价 = T日收盘价 × 1.01，T+1日开盘才成交）
 
+        批量评分优化：一次性获取所有股票数据，批量计算特征和预测评分，
+        大幅提升 GPU 利用率和回测速度。
+
         Args:
             trade_date: 生成推荐的交易日（T日），评分使用该日及之前的数据
         """
@@ -388,18 +391,34 @@ class StrategyBacktest:
         db.close()
 
         score_as_of = trade_date + timedelta(days=1)
-        scored = []
+
+        stocks_data = {}
         for code in codes:
-            r = self._score_stock_for_date(code, score_as_of)
-            if r:
-                scored.append(r)
+            data = StrategyBacktest._get_stock_data_before_date(code, score_as_of, days=30)
+            if data is not None and data['latest'] is not None:
+                stocks_data[code] = data
+
+        scored = []
+        if hasattr(self.strategy, 'batch_score_from_data'):
+            batch_results = self.strategy.batch_score_from_data(stocks_data)
+            for code, r in batch_results.items():
+                if r is None:
+                    continue
+                data = stocks_data[code]
+                if not self.strategy._is_limit_up_down(data['latest']):
+                    scored.append(r)
+        else:
+            for code in codes:
+                r = self._score_stock_for_date(code, score_as_of)
+                if r:
+                    scored.append(r)
+
         scored.sort(key=lambda x: x['total_score'], reverse=True)
 
         recs = []
         for s in scored:
             if len(recs) >= available_slots:
                 break
-            # 自适应门槛过滤：低于门槛的股票直接跳过（已降序，遇到第一个即可终止）
             if s['total_score'] < self._adaptive_score_threshold:
                 break
             close = s['latest_close']
@@ -524,8 +543,9 @@ class StrategyBacktest:
         sell_log = []  # 交易明细
         pending_recs = []  # T 日生成的候选，T+1 日开盘成交
 
-        for day in trading_days:
+        for i, day in enumerate(trading_days):
             day_data = self._get_stock_data_for_date(day)
+            print(f'[回测] 进度: {i+1}/{len(trading_days)} [{day.strftime("%Y-%m-%d")}]')
 
             # 自适应参数更新：根据截至昨日的收益进度调整门槛和仓位
             tier = self._update_adaptive_params()

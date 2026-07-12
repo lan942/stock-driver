@@ -256,7 +256,12 @@ def _build_feature_label_dataframe(
             if feats.empty:
                 continue
 
-            with_returns = compute_future_returns(feats, lookahead=lookahead)
+            with_returns = compute_future_returns(
+                feats,
+                lookahead=lookahead,
+                stop_profit_pct=0.06,
+                stop_loss_pct=0.03
+            )
             if with_returns.empty:
                 continue
             results.append(with_returns)
@@ -313,11 +318,14 @@ def train_model(lookahead: int = 5) -> dict:
     if full.empty:
         return {'error': '排除涨跌停后无有效数据'}
 
-    # 4. 截面去中心化分配标签：和当天全市场中位数比，剥离大盘 Beta，学选股 Alpha
-    label_method = 'cross_sectional_median'
-    full = assign_labels(full, method=label_method)
-    label_ratio = full['label'].mean()
-    print(f"   标签分配 (method={label_method}): 跑赢中位数={label_ratio:.1%}, 跑输={1-label_ratio:.1%}")
+    # 4. 截面去中心化分配多档标签：将截面 future_ret 分成 5 档，让 XGBRanker 学习精细排序
+    label_method = 'cross_sectional_qcut'
+    full = assign_labels(full, method=label_method, qcut_bins=5)
+    label_dist = full['label'].value_counts().sort_index()
+    print(f"   标签分配 (method={label_method}, bins=5):")
+    for bin_val, count in label_dist.items():
+        pct = count / len(full) * 100
+        print(f"     档{bin_val}: {count} 行 ({pct:.1f}%)")
 
     # 5. 时序切分（前 80% 训练，后 20% 测试）
     #    训练集和测试集之间必须留出 lookahead 天的空白隔离期：
@@ -410,9 +418,15 @@ def train_model(lookahead: int = 5) -> dict:
 
     # 8. 评估：ranker 的 predict 返回 raw score，用于排序（非概率）
     scores = model.predict(X_test)
-    auc = roc_auc_score(y_test, scores)
 
-    # Top-K Precision：按日期分组，每日取 score 最高的 K 只股票，看实际跑赢中位数比例
+    # 多分类 AUC：使用 OVR 方式
+    try:
+        auc = roc_auc_score(y_test, scores, multi_class='ovr')
+    except ValueError:
+        auc = None
+
+    # Top-K Precision：按日期分组，每日取 score 最高的 K 只股票
+    # 多档标签下，看 top K 中高档次（>= 中位数档）的比例
     score_df = pd.DataFrame({
         'date': test_dates_series.values,
         'score': scores,
@@ -428,7 +442,9 @@ def train_model(lookahead: int = 5) -> dict:
             if len(group) < k:
                 continue
             top_k = group.nlargest(k, 'score')
-            daily_precisions.append(top_k['label'].mean())
+            # 多档标签下，看 top K 中高档次（>= 中位数档）的比例
+            high_quality_ratio = (top_k['label'] >= 3).mean()
+            daily_precisions.append(high_quality_ratio)
             sorted_labels = group.sort_values('score', ascending=False)['label'].values
             daily_ndcgs.append(_ndcg_at_k(sorted_labels, k))
         topk_results[f'top_{k}_precision'] = round(
@@ -439,7 +455,7 @@ def train_model(lookahead: int = 5) -> dict:
         ) if daily_ndcgs else 0.0
 
     print("\n📊 测试集评估报告 (Ranking):")
-    print(f"   AUC:              {auc:.4f}")
+    print(f"   AUC:              {auc:.4f}" if auc is not None else "   AUC:              N/A")
     print(f"   Top-5 Precision:  {topk_results['top_5_precision']:.4f}")
     print(f"   Top-10 Precision: {topk_results['top_10_precision']:.4f}")
     print(f"   Top-20 Precision: {topk_results['top_20_precision']:.4f}")
@@ -474,18 +490,19 @@ def train_model(lookahead: int = 5) -> dict:
         'test_samples': len(X_test),
         'train_groups': int(len(train_groups)),
         'test_groups': int(len(test_groups)),
-        'auc': round(float(auc), 4),
+        'auc': round(float(auc), 4) if auc is not None else None,
         'top_5_precision': topk_results['top_5_precision'],
         'top_10_precision': topk_results['top_10_precision'],
         'top_20_precision': topk_results['top_20_precision'],
         'ndcg_5': ndcg_results['ndcg_5'],
         'ndcg_10': ndcg_results['ndcg_10'],
         'ndcg_20': ndcg_results['ndcg_20'],
-        'label_positive_ratio': round(float(label_ratio), 4),
+        'label_positive_ratio': None,
+        'label_distribution': {str(k): int(v) for k, v in label_dist.items()},
         'label_method': label_method,
         'trained_at': datetime.now().isoformat(),
         'gpu_used': gpu_available,
-        'n_estimators': 500,
+        'n_estimators': 200,
         'max_depth': 5,
         'learning_rate': 0.05,
     }
@@ -503,14 +520,15 @@ def train_model(lookahead: int = 5) -> dict:
         'train_samples': len(X_train),
         'test_samples': len(X_test),
         'feature_cols': feature_cols,
-        'auc': round(float(auc), 4),
+        'auc': round(float(auc), 4) if auc is not None else None,
         'top_5_precision': topk_results['top_5_precision'],
         'top_10_precision': topk_results['top_10_precision'],
         'top_20_precision': topk_results['top_20_precision'],
         'ndcg_5': ndcg_results['ndcg_5'],
         'ndcg_10': ndcg_results['ndcg_10'],
         'ndcg_20': ndcg_results['ndcg_20'],
-        'label_positive_ratio': round(float(label_ratio), 4),
+        'label_positive_ratio': None,
+        'label_distribution': {str(k): int(v) for k, v in label_dist.items()},
         'label_method': label_method,
         'gpu_used': gpu_available,
         'model_path': MODEL_PATH,

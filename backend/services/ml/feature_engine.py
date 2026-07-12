@@ -129,7 +129,7 @@ def build_features(
             for name, func in extra_features.items():
                 result[name] = (
                     result.groupby('code', group_keys=False)
-                    .apply(lambda g: func(g).reindex(g.index), include_groups=False)
+                    .apply(lambda g: func(g).reindex(g.index))
                 )
                 result = result.dropna(subset=[name])
         else:

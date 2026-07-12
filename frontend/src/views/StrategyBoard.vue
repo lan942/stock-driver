@@ -73,9 +73,12 @@
         </div>
       </template>
       <el-form inline>
-        <el-form-item label="起始日期">
+        <el-form-item label="起始日期" :validate-state="!backtestDates || backtestDates.length !== 2 ? 'error' : ''">
           <el-date-picker v-model="backtestDates" type="daterange" range-separator="至"
             start-placeholder="起始日" end-placeholder="截止日" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
+          <div v-if="!backtestDates || backtestDates.length !== 2" style="color:#f56c6c;font-size:12px;margin-top:4px">
+            请选择回测日期范围
+          </div>
         </el-form-item>
       </el-form>
       <div v-if="backtestResult" style="margin-top:12px">
@@ -120,8 +123,8 @@
           <el-table-column prop="date" label="卖出日" width="100" />
           <el-table-column prop="reason" label="原因" width="80">
             <template #default="{ row }">
-              <el-tag :type="row.reason === 'sold' ? 'success' : 'warning'" size="small">
-                {{ row.reason === 'sold' ? '止盈/止损' : '超时' }}
+              <el-tag :type="getReasonType(row.reason)" size="small">
+                {{ getReasonText(row.reason) }}
               </el-tag>
             </template>
           </el-table-column>
@@ -260,7 +263,12 @@ async function runBacktestHandler() {
     await nextTick()
     drawEquityChart()
   } catch (e) {
-    ElMessage.error('回测失败: ' + (e.response?.data?.error || e.message))
+    const errorMsg = e.response?.data?.error || e.message
+    if (errorMsg.includes('无交易数据')) {
+      ElMessage.error('回测失败: ' + errorMsg + '\\n请检查数据库中是否有该日期范围的数据')
+    } else {
+      ElMessage.error('回测失败: ' + errorMsg)
+    }
   } finally {
     backtesting.value = false
   }
@@ -293,6 +301,28 @@ async function clearBacktestHandler() {
   } catch (e) {
     ElMessage.error('清除失败')
   }
+}
+
+function getReasonType(reason) {
+  if (!reason) return 'info'
+  const profitReasons = ['take_profit', 'atr_profit', 'sold']
+  const lossReasons = ['stop_loss', 'atr_loss']
+  if (profitReasons.includes(reason)) return 'success'
+  if (lossReasons.includes(reason)) return 'danger'
+  return 'warning'
+}
+
+function getReasonText(reason) {
+  const reasonMap = {
+    'take_profit': '止盈',
+    'atr_profit': 'ATR止盈',
+    'stop_loss': '止损',
+    'atr_loss': 'ATR止损',
+    'timeout': '超时',
+    'force_close': '强制清仓',
+    'sold': '止盈/止损',
+  }
+  return reasonMap[reason] || reason
 }
 
 onMounted(async () => {

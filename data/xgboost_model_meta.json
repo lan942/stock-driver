@@ -25,28 +25,35 @@
   "lookahead": 5,
   "train_date_range": [
     "2025-02-06",
-    "2026-06-12"
+    "2026-06-17"
   ],
   "test_date_range": [
-    "2026-06-23",
-    "2026-06-30"
+    "2026-06-26",
+    "2026-07-07"
   ],
-  "train_samples": 80637,
-  "test_samples": 29774,
-  "train_groups": 133,
-  "test_groups": 6,
-  "auc": 0.4794,
-  "top_5_precision": 0.7333,
-  "top_10_precision": 0.65,
-  "top_20_precision": 0.475,
-  "ndcg_5": 0.7515,
-  "ndcg_10": 0.6848,
-  "ndcg_20": 0.549,
-  "label_positive_ratio": 0.4993,
-  "label_method": "cross_sectional_median",
-  "trained_at": "2026-07-12T10:12:06.533058",
+  "train_samples": 95713,
+  "test_samples": 30358,
+  "train_groups": 136,
+  "test_groups": 7,
+  "auc": null,
+  "top_5_precision": 0.4571,
+  "top_10_precision": 0.4857,
+  "top_20_precision": 0.4571,
+  "ndcg_5": 0.4814,
+  "ndcg_10": 0.503,
+  "ndcg_20": 0.4912,
+  "label_positive_ratio": null,
+  "label_distribution": {
+    "0": 30316,
+    "1": 30173,
+    "2": 30202,
+    "3": 30166,
+    "4": 30210
+  },
+  "label_method": "cross_sectional_qcut",
+  "trained_at": "2026-07-12T12:10:00.955639",
   "gpu_used": true,
-  "n_estimators": 500,
+  "n_estimators": 200,
   "max_depth": 5,
   "learning_rate": 0.05
 }

@@ -32,7 +32,7 @@
           <div class="card-value" :class="{ 'profit-positive': overview.total_profit >= 0, 'profit-negative': overview.total_profit < 0 }">
             {{ overview.total_profit >= 0 ? '+' : '' }}¥{{ formatNumber(overview.total_profit) }}
             <span class="profit-rate" :class="{ 'profit-positive': overview.total_profit_rate >= 0, 'profit-negative': overview.total_profit_rate < 0 }">
-              ({{ overview.total_profit_rate >= 0 ? '+' : '' }}{{ overview.total_profit_rate.toFixed(2) }}%)
+              ({{ overview.total_profit_rate >= 0 ? '+' : '' }}{{ safeFixed(overview.total_profit_rate) }}%)
             </span>
           </div>
         </div>
@@ -63,24 +63,24 @@
         </el-table-column>
         <el-table-column prop="quantity" label="持仓数量" width="100" align="center">
           <template #default="{ row }">
-            {{ row.quantity.toLocaleString() }} 股
+            {{ safeLocale(row.quantity) }} 股
           </template>
         </el-table-column>
         <el-table-column prop="available_quantity" label="可用数量" width="100" align="center">
           <template #default="{ row }">
             <span :class="{ 't-plus-one': row.available_quantity < row.quantity }">
-              {{ row.available_quantity.toLocaleString() }} 股
+              {{ safeLocale(row.available_quantity) }} 股
             </span>
           </template>
         </el-table-column>
         <el-table-column prop="cost_price" label="成本价" width="100" align="center">
           <template #default="{ row }">
-            ¥{{ row.cost_price.toFixed(2) }}
+            ¥{{ safeFixed(row.cost_price) }}
           </template>
         </el-table-column>
         <el-table-column prop="current_price" label="现价" width="100" align="center">
           <template #default="{ row }">
-            ¥{{ row.current_price.toFixed(2) }}
+            ¥{{ safeFixed(row.current_price) }}
           </template>
         </el-table-column>
         <el-table-column prop="market_value" label="市值" width="120" align="center">
@@ -98,7 +98,7 @@
         <el-table-column prop="profit_rate" label="收益率" width="100" align="center">
           <template #default="{ row }">
             <span :class="{ 'profit-positive': row.profit_rate >= 0, 'profit-negative': row.profit_rate < 0 }">
-              {{ row.profit_rate >= 0 ? '+' : '' }}{{ row.profit_rate.toFixed(2) }}%
+              {{ row.profit_rate >= 0 ? '+' : '' }}{{ safeFixed(row.profit_rate) }}%
             </span>
           </template>
         </el-table-column>
@@ -152,22 +152,22 @@
         </el-table-column>
         <el-table-column prop="quantity" label="数量" width="90">
           <template #default="{ row }">
-            {{ row.quantity.toLocaleString() }} 股
+            {{ safeLocale(row.quantity) }} 股
           </template>
         </el-table-column>
         <el-table-column prop="price" label="成交价" width="90">
           <template #default="{ row }">
-            ¥{{ row.price.toFixed(2) }}
+            ¥{{ safeFixed(row.price) }}
           </template>
         </el-table-column>
         <el-table-column prop="open_price" label="开盘价" width="90">
           <template #default="{ row }">
-            {{ row.open_price !== null && row.open_price !== undefined ? '¥' + row.open_price.toFixed(2) : '-' }}
+            {{ row.open_price !== null && row.open_price !== undefined ? '¥' + safeFixed(row.open_price) : '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="close_price" label="收盘价" width="90">
           <template #default="{ row }">
-            {{ row.close_price !== null && row.close_price !== undefined ? '¥' + row.close_price.toFixed(2) : '-' }}
+            {{ row.close_price !== null && row.close_price !== undefined ? '¥' + safeFixed(row.close_price) : '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="amount" label="成交金额" width="110">
@@ -183,7 +183,7 @@
         <el-table-column prop="profit_pct" label="收益率" width="100" align="center">
           <template #default="{ row }">
             <span v-if="row.profit_pct !== null && row.profit_pct !== undefined" :class="{ 'profit-positive': row.profit_pct >= 0, 'profit-negative': row.profit_pct < 0 }">
-              {{ row.profit_pct >= 0 ? '+' : '' }}{{ row.profit_pct.toFixed(2) }}%
+              {{ row.profit_pct >= 0 ? '+' : '' }}{{ safeFixed(row.profit_pct) }}%
             </span>
             <span v-else>-</span>
           </template>
@@ -405,6 +405,16 @@ const cashForm = reactive({
 const formatNumber = (num) => {
   if (num === null || num === undefined) return '0.00'
   return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const safeFixed = (val, digits = 2) => {
+  if (val === null || val === undefined || isNaN(val)) return '0.00'
+  return val.toFixed(digits)
+}
+
+const safeLocale = (val) => {
+  if (val === null || val === undefined) return '0'
+  return val.toLocaleString()
 }
 
 const disableFutureDate = (time) => {

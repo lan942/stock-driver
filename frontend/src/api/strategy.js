@@ -15,7 +15,7 @@ export function getRecommendations() {
 }
 
 export function runBacktest(data) {
-  return axios.post(`${BASE}/backtest`, data)
+  return axios.post(`${BASE}/backtest`, data, { timeout: 300000 })
 }
 
 export function clearBacktest() {
