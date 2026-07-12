@@ -219,18 +219,21 @@ def _validate_group_order(dates: pd.Series, group: np.ndarray, dataset_name: str
         return False
 
     group_idx = 0
-    current_group_size = group[0]
+    start_idx = 0
     date_boundaries = []
     for i, date in enumerate(dates):
-        if i >= current_group_size:
-            date_boundaries.append((dates.iloc[i - current_group_size], dates.iloc[i - 1]))
+        if i >= start_idx + group[group_idx]:
+            date_boundaries.append((dates.iloc[start_idx], dates.iloc[i - 1]))
             group_idx += 1
+            start_idx = i
             if group_idx >= len(group):
                 break
-            current_group_size += group[group_idx]
 
-    if group_idx < len(group) - 1:
-        print(f"❌ [{dataset_name}] group 遍历未完成: group_idx={group_idx}, group_len={len(group)}")
+    if group_idx < len(group):
+        date_boundaries.append((dates.iloc[start_idx], dates.iloc[-1]))
+
+    if len(date_boundaries) != len(group):
+        print(f"❌ [{dataset_name}] 边界数与 group 长度不匹配: boundaries={len(date_boundaries)}, group_len={len(group)}")
         return False
 
     for i, (start_date, end_date) in enumerate(date_boundaries):
