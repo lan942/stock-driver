@@ -362,11 +362,12 @@ def cmd_train_xgboost(args):
             print()
             print(blue("📊 核心评估指标:"))
             print(gray(f"  AUC:              {result['auc']}"))
-            print(gray(f"  Precision:        {result['precision']}"))
             print(gray(f"  Top-5 Precision:  {result['top_5_precision']}"))
             print(gray(f"  Top-10 Precision: {result['top_10_precision']}"))
             print(gray(f"  Top-20 Precision: {result['top_20_precision']}"))
-            print(gray(f"  Accuracy (参考):  {result['train_accuracy']}"))
+            print(gray(f"  NDCG@5:           {result['ndcg_5']}"))
+            print(gray(f"  NDCG@10:          {result['ndcg_10']}"))
+            print(gray(f"  NDCG@20:          {result['ndcg_20']}"))
 
             if result.get('feature_importances'):
                 print()

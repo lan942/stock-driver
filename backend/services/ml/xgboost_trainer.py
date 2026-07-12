@@ -1,13 +1,13 @@
 """XGBoost 训练器
 
-GPU 加速的 XGBoost 二分类模型训练流水线：
+GPU 加速的 XGBoost 排序学习（Learning to Rank）训练流水线：
 1. 从数据库加载全量 StockDaily 数据
 2. 按股票分组构建特征并计算未来收益率（在完整时间序列上计算，避免 shift/rolling 错位）
 3. 排除涨跌停日样本（在特征和收益率计算完成后进行）
 4. 截面去中心化分配标签（按日期和当日全市场中位数比，剥离大盘 Beta，学选股 Alpha）
 5. 时序切分训练/测试集
-6. 训练并评估模型
-7. 保存模型和元信息
+6. 按交易日构造 group，用 rank:pairwise 目标训练 XGBRanker（与 Top-K 选股逻辑自洽）
+7. 评估并保存模型和元信息
 """
 
 import json
@@ -17,7 +17,7 @@ from typing import Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, roc_auc_score, precision_score
+from sklearn.metrics import roc_auc_score
 
 from backend.utils.db import get_db
 from backend.models.stock import StockDaily
@@ -110,6 +110,40 @@ def _filter_limit_up_down(df: pd.DataFrame) -> pd.DataFrame:
         (df['change_percent'] <= -limit_pct)
     )
     return df[mask].copy()
+
+
+def _ndcg_at_k(labels_sorted_by_score: np.ndarray, k: int) -> float:
+    """单日 NDCG@K
+
+    Args:
+        labels_sorted_by_score: 当日样本的 0/1 相关性标签数组，已按预测 score 降序排列
+        k: Top-K 位置
+
+    Returns:
+        NDCG@K 值（0~1），当日无正样本时返回 0
+    """
+    if len(labels_sorted_by_score) == 0:
+        return 0.0
+    dcg_labels = labels_sorted_by_score[:k]
+    dcg = (dcg_labels / np.log2(np.arange(2, len(dcg_labels) + 2))).sum()
+    ideal = np.sort(labels_sorted_by_score)[::-1][:k]
+    idcg = (ideal / np.log2(np.arange(2, len(ideal) + 2))).sum()
+    return float(dcg / idcg) if idcg > 0 else 0.0
+
+
+def _build_group_array(dates: pd.Series) -> np.ndarray:
+    """按日期构造 XGBRanker 所需的 group 数组
+
+    XGBRanker.fit() 的 group 参数要求：每个 group 的样本数，且 X/y 必须按 group 顺序连续排列。
+    调用前必须确保 dates 已升序排列（同一日期样本连续）。
+
+    Args:
+        dates: 已排序的日期 Series（与 X 行顺序一致）
+
+    Returns:
+        group 数组，长度等于唯一日期数
+    """
+    return dates.groupby(dates.values).size().values
 
 
 def _build_feature_label_dataframe(
@@ -230,17 +264,32 @@ def train_model(lookahead: int = 5) -> dict:
     X_test = X_test.replace([np.inf, -np.inf], np.nan).dropna()
     y_test = y_test.loc[X_test.index]
 
-    train_dates = (full.loc[train_mask, 'date'].min(), full.loc[train_mask, 'date'].max())
-    test_dates = (full.loc[test_mask, 'date'].min(), full.loc[test_mask, 'date'].max())
+    # XGBRanker 要求 X/y 按 group 连续排列：按 date 升序排序，构造每个交易日的 group 数组
+    train_dates_series = full.loc[X_train.index, 'date']
+    train_order = train_dates_series.values.argsort(kind='stable')
+    X_train = X_train.iloc[train_order].reset_index(drop=True)
+    y_train = y_train.iloc[train_order].reset_index(drop=True)
+    train_dates_series = train_dates_series.iloc[train_order].reset_index(drop=True)
+    train_groups = _build_group_array(train_dates_series)
+
+    test_dates_series = full.loc[X_test.index, 'date']
+    test_order = test_dates_series.values.argsort(kind='stable')
+    X_test = X_test.iloc[test_order].reset_index(drop=True)
+    y_test = y_test.iloc[test_order].reset_index(drop=True)
+    test_dates_series = test_dates_series.iloc[test_order].reset_index(drop=True)
+    test_groups = _build_group_array(test_dates_series)
+
+    train_dates = (train_dates_series.min(), train_dates_series.max())
+    test_dates = (test_dates_series.min(), test_dates_series.max())
 
     print(f"\n📅 数据集划分 (lookahead={lookahead}, 隔离期={lookahead} 个交易日):")
-    print(f"   训练集: {len(X_train)} 行 ({train_dates[0]} ~ {train_dates[1]})")
-    print(f"   测试集: {len(X_test)} 行 ({test_dates[0]} ~ {test_dates[1]})")
+    print(f"   训练集: {len(X_train)} 行 ({train_dates[0]} ~ {train_dates[1]}), {len(train_groups)} 个交易日")
+    print(f"   测试集: {len(X_test)} 行 ({test_dates[0]} ~ {test_dates[1]}), {len(test_groups)} 个交易日")
 
     # 6. GPU 检测和模型初始化
     gpu_available = _detect_gpu()
     if gpu_available:
-        print("\n🚀 初始化 XGBoost 模型（启用 GPU 加速）...")
+        print("\n🚀 初始化 XGBRanker（启用 GPU 加速，objective=rank:pairwise）...")
         device = 'cuda'
     else:
         print("\n⚠️  GPU 不可用，降级到 CPU 训练...")
@@ -252,59 +301,65 @@ def train_model(lookahead: int = 5) -> dict:
         print("❌ xgboost 未安装，请运行: pip install xgboost")
         return {'error': 'xgboost 未安装'}
 
-    model = xgb.XGBClassifier(
+    model = xgb.XGBRanker(
         n_estimators=500,
         max_depth=5,
         learning_rate=0.05,
         tree_method='hist',
         device=device,
-        objective='binary:logistic',
-        eval_metric='auc',
+        objective='rank:pairwise',
+        eval_metric=['ndcg', 'auc'],
         random_state=42,
     )
 
-    # 7. 训练模型
+    # 7. 训练模型（按交易日 group 训练，让模型学日内相对排序）
     print("\n🧠 模型训练中...")
     model.fit(
         X_train, y_train,
+        group=train_groups,
         eval_set=[(X_train, y_train), (X_test, y_test)],
+        eval_group=[train_groups, test_groups],
         verbose=100,
     )
 
-    # 8. 评估
-    preds = model.predict(X_test)
-    proba = model.predict_proba(X_test)[:, 1]
-    acc = accuracy_score(y_test, preds)
-    auc = roc_auc_score(y_test, proba)
-    precision = precision_score(y_test, preds, zero_division=0)
+    # 8. 评估：ranker 的 predict 返回 raw score，用于排序（非概率）
+    scores = model.predict(X_test)
+    auc = roc_auc_score(y_test, scores)
 
-    # Top-K Precision：按日期分组，每日取概率最高的 K 只股票，看实际上涨比例
-    test_dates_series = full.loc[X_test.index, 'date']
-    proba_df = pd.DataFrame({
+    # Top-K Precision：按日期分组，每日取 score 最高的 K 只股票，看实际跑赢中位数比例
+    score_df = pd.DataFrame({
         'date': test_dates_series.values,
-        'proba': proba,
+        'score': scores,
         'label': y_test.values,
     })
 
     topk_results = {}
+    ndcg_results = {}
     for k in [5, 10, 20]:
         daily_precisions = []
-        for day, group in proba_df.groupby('date'):
+        daily_ndcgs = []
+        for day, group in score_df.groupby('date'):
             if len(group) < k:
                 continue
-            top_k = group.nlargest(k, 'proba')
+            top_k = group.nlargest(k, 'score')
             daily_precisions.append(top_k['label'].mean())
+            sorted_labels = group.sort_values('score', ascending=False)['label'].values
+            daily_ndcgs.append(_ndcg_at_k(sorted_labels, k))
         topk_results[f'top_{k}_precision'] = round(
             float(np.mean(daily_precisions)), 4
         ) if daily_precisions else 0.0
+        ndcg_results[f'ndcg_{k}'] = round(
+            float(np.mean(daily_ndcgs)), 4
+        ) if daily_ndcgs else 0.0
 
-    print("\n📊 测试集评估报告:")
-    print(classification_report(y_test, preds))
-    print(f"   AUC: {auc:.4f}")
-    print(f"   Precision: {precision:.4f}")
+    print("\n📊 测试集评估报告 (Ranking):")
+    print(f"   AUC:              {auc:.4f}")
     print(f"   Top-5 Precision:  {topk_results['top_5_precision']:.4f}")
     print(f"   Top-10 Precision: {topk_results['top_10_precision']:.4f}")
     print(f"   Top-20 Precision: {topk_results['top_20_precision']:.4f}")
+    print(f"   NDCG@5:           {ndcg_results['ndcg_5']:.4f}")
+    print(f"   NDCG@10:          {ndcg_results['ndcg_10']:.4f}")
+    print(f"   NDCG@20:          {ndcg_results['ndcg_20']:.4f}")
 
     # 特征重要性
     importances = pd.Series(model.feature_importances_, index=feature_cols)
@@ -317,6 +372,8 @@ def train_model(lookahead: int = 5) -> dict:
 
     # 训练元信息
     meta = {
+        'model_type': 'ranker',
+        'objective': 'rank:pairwise',
         'feature_cols': feature_cols,
         'lookahead': lookahead,
         'train_date_range': [
@@ -329,12 +386,15 @@ def train_model(lookahead: int = 5) -> dict:
         ],
         'train_samples': len(X_train),
         'test_samples': len(X_test),
-        'train_accuracy': round(acc, 4),
+        'train_groups': int(len(train_groups)),
+        'test_groups': int(len(test_groups)),
         'auc': round(float(auc), 4),
-        'precision': round(float(precision), 4),
         'top_5_precision': topk_results['top_5_precision'],
         'top_10_precision': topk_results['top_10_precision'],
         'top_20_precision': topk_results['top_20_precision'],
+        'ndcg_5': ndcg_results['ndcg_5'],
+        'ndcg_10': ndcg_results['ndcg_10'],
+        'ndcg_20': ndcg_results['ndcg_20'],
         'label_positive_ratio': round(float(label_ratio), 4),
         'label_method': label_method,
         'trained_at': datetime.now().isoformat(),
@@ -352,15 +412,18 @@ def train_model(lookahead: int = 5) -> dict:
 
     return {
         'success': True,
+        'model_type': 'ranker',
+        'objective': 'rank:pairwise',
         'train_samples': len(X_train),
         'test_samples': len(X_test),
         'feature_cols': feature_cols,
-        'train_accuracy': round(acc, 4),
         'auc': round(float(auc), 4),
-        'precision': round(float(precision), 4),
         'top_5_precision': topk_results['top_5_precision'],
         'top_10_precision': topk_results['top_10_precision'],
         'top_20_precision': topk_results['top_20_precision'],
+        'ndcg_5': ndcg_results['ndcg_5'],
+        'ndcg_10': ndcg_results['ndcg_10'],
+        'ndcg_20': ndcg_results['ndcg_20'],
         'label_positive_ratio': round(float(label_ratio), 4),
         'label_method': label_method,
         'gpu_used': gpu_available,

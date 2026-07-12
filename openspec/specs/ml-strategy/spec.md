@@ -25,19 +25,21 @@ ML 策略类 `XGBoostStrategy` SHALL 实现 `IStrategy` 接口，提供 `score_s
 - **WHEN** `data/xgboost_model.json` 不存在
 - **THEN** 抛出 `FileNotFoundError` 并提示用户先运行 `manage.py train-xgboost`
 
-### Requirement: 基于模型预测概率评分
+### Requirement: 基于模型排序分数评分
 `score_stock(code)` SHALL 执行以下步骤：
 1. 从数据库获取该股票最近 60 个交易日的 OHLCV 数据
 2. 调用 `feature_engine.build_features()` 计算特征
 3. 取最后一行（最新日期）的特征值
-4. 调用 `model.predict_proba([features])[:, 1]` 获取上涨概率作为评分
-5. 评分为 0~1 之间的小数，越高表示上涨概率越大
+4. 调用 `model.predict([features])` 获取 raw score 作为评分（ranker 输出，非概率）
+5. 评分为浮点数，越高表示预期相对表现越好（无概率含义，仅用于排序选股）
 
 返回格式 SHALL 与现有策略一致：包含 `code`, `total_score`, `factor_scores`, `latest_close`, `latest_volume`, `latest_change_pct`。
 
+策略初始化时 SHALL 检查 `data/xgboost_model_meta.json` 的 `model_type` 字段，若为 `'ranker'` 则使用 `predict`，若为 `'binary'` 则使用 `predict_proba`（向后兼容旧模型）。
+
 #### Scenario: 正常评分
 - **WHEN** 对一只数据充足的股票调用 `score_stock('000001')`
-- **THEN** 返回包含 0~1 之间 `total_score` 的评分字典
+- **THEN** 返回包含 `total_score`（浮点 raw score）的评分字典
 
 #### Scenario: 数据不足时返回 None
 - **WHEN** 股票交易数据不足 60 个交易日
