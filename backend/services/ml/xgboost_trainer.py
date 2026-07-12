@@ -23,6 +23,7 @@ from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
 from backend.services.ml.feature_engine import build_features
 from backend.services.ml.label_generator import assign_labels, compute_future_returns
+from backend.services.strategy_config import StrategyConfigService
 
 # 默认特征列
 # 量价特征（per-stock，在 build_features 中计算）
@@ -173,7 +174,83 @@ def _build_group_array(dates: pd.Series) -> np.ndarray:
     Returns:
         group 数组，长度等于唯一日期数
     """
-    return dates.groupby(dates.values).size().values
+    return dates.groupby(dates.values, sort=False).size().values
+
+
+def _validate_group_order(dates: pd.Series, group: np.ndarray, dataset_name: str) -> bool:
+    """校验 Group 排序的正确性（XGBRanker 训练的关键前提）
+
+    XGBRanker 使用 Pairwise Loss 时，要求：
+    1. 数据必须按日期严格升序排列（同一日期样本连续）
+    2. group 数组的顺序必须与日期出现顺序一致
+    3. group 数组的累加和必须等于总样本数
+    4. 不允许跨日期的偏序对（今天的样本不能穿插在昨天的样本中间）
+
+    Args:
+        dates: 日期 Series（与 X/y 行顺序一致）
+        group: 构造的 group 数组
+        dataset_name: 数据集名称（训练集/测试集）
+
+    Returns:
+        校验通过返回 True，失败返回 False（打印错误信息）
+    """
+    if dates.empty:
+        print(f"❌ [{dataset_name}] 日期序列为空")
+        return False
+
+    if len(group) == 0:
+        print(f"❌ [{dataset_name}] group 数组为空")
+        return False
+
+    total_samples = len(dates)
+    group_sum = int(group.sum())
+    if group_sum != total_samples:
+        print(f"❌ [{dataset_name}] group 累加和不一致: group_sum={group_sum}, total_samples={total_samples}")
+        return False
+
+    unique_dates = dates.unique()
+    if len(unique_dates) != len(group):
+        print(f"❌ [{dataset_name}] 唯一日期数与 group 长度不匹配: unique_dates={len(unique_dates)}, group_len={len(group)}")
+        return False
+
+    is_sorted = dates.is_monotonic_increasing
+    if not is_sorted:
+        print(f"❌ [{dataset_name}] 日期序列未严格升序排列")
+        return False
+
+    group_idx = 0
+    current_group_size = group[0]
+    date_boundaries = []
+    for i, date in enumerate(dates):
+        if i >= current_group_size:
+            date_boundaries.append((dates.iloc[i - current_group_size], dates.iloc[i - 1]))
+            group_idx += 1
+            if group_idx >= len(group):
+                break
+            current_group_size += group[group_idx]
+
+    if group_idx < len(group) - 1:
+        print(f"❌ [{dataset_name}] group 遍历未完成: group_idx={group_idx}, group_len={len(group)}")
+        return False
+
+    for i, (start_date, end_date) in enumerate(date_boundaries):
+        if start_date != end_date:
+            print(f"❌ [{dataset_name}] 第 {i} 个 group 存在日期跨越: {start_date} ~ {end_date}")
+            return False
+
+    dates_in_group_order = dates.iloc[np.cumsum(group) - 1].values
+    unique_dates_sorted = np.sort(unique_dates)
+    if not np.array_equal(dates_in_group_order, unique_dates_sorted):
+        print(f"❌ [{dataset_name}] group 顺序与日期排序不一致")
+        return False
+
+    expected_group = dates.groupby(dates.values, sort=False).size().values
+    if not np.array_equal(group, expected_group):
+        print(f"❌ [{dataset_name}] group 数组与实际分组不符")
+        return False
+
+    print(f"✅ [{dataset_name}] Group 排序校验通过: {len(group)} 个交易日, {total_samples} 个样本")
+    return True
 
 
 def _add_cross_sectional_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -256,11 +333,15 @@ def _build_feature_label_dataframe(
             if feats.empty:
                 continue
 
+            stop_profit_pct = float(StrategyConfigService.get('stop_profit_pct') or 0.06)
+            stop_loss_pct = float(StrategyConfigService.get('stop_loss_pct') or 0.03)
+            force_close_method = StrategyConfigService.get('force_close_method') or 'day_n_close'
             with_returns = compute_future_returns(
                 feats,
                 lookahead=lookahead,
-                stop_profit_pct=0.06,
-                stop_loss_pct=0.03
+                stop_profit_pct=stop_profit_pct,
+                stop_loss_pct=stop_loss_pct,
+                force_close_method=force_close_method
             )
             if with_returns.empty:
                 continue
@@ -359,18 +440,27 @@ def train_model(lookahead: int = 5) -> dict:
     y_test = y_test.loc[X_test.index]
 
     # XGBRanker 要求 X/y 按 group 连续排列：按 date 升序排序，构造每个交易日的 group 数组
-    train_dates_series = full.loc[X_train.index, 'date']
-    train_order = train_dates_series.values.argsort(kind='stable')
-    X_train = X_train.iloc[train_order].reset_index(drop=True)
-    y_train = y_train.iloc[train_order].reset_index(drop=True)
-    train_dates_series = train_dates_series.iloc[train_order].reset_index(drop=True)
+    # 使用 sort_values 确保严格的日期升序排列（argsort 可能在日期相同时产生不稳定结果）
+    train_full = pd.DataFrame({
+        'date': full.loc[X_train.index, 'date'].values,
+        'label': y_train.values,
+    })
+    train_full[feature_cols] = X_train.values
+    train_full = train_full.sort_values('date').reset_index(drop=True)
+    X_train = train_full[feature_cols]
+    y_train = train_full['label']
+    train_dates_series = train_full['date']
     train_groups = _build_group_array(train_dates_series)
 
-    test_dates_series = full.loc[X_test.index, 'date']
-    test_order = test_dates_series.values.argsort(kind='stable')
-    X_test = X_test.iloc[test_order].reset_index(drop=True)
-    y_test = y_test.iloc[test_order].reset_index(drop=True)
-    test_dates_series = test_dates_series.iloc[test_order].reset_index(drop=True)
+    test_full = pd.DataFrame({
+        'date': full.loc[X_test.index, 'date'].values,
+        'label': y_test.values,
+    })
+    test_full[feature_cols] = X_test.values
+    test_full = test_full.sort_values('date').reset_index(drop=True)
+    X_test = test_full[feature_cols]
+    y_test = test_full['label']
+    test_dates_series = test_full['date']
     test_groups = _build_group_array(test_dates_series)
 
     train_dates = (train_dates_series.min(), train_dates_series.max())
@@ -379,6 +469,17 @@ def train_model(lookahead: int = 5) -> dict:
     print(f"\n📅 数据集划分 (lookahead={lookahead}, 隔离期={lookahead} 个交易日):")
     print(f"   训练集: {len(X_train)} 行 ({train_dates[0]} ~ {train_dates[1]}), {len(train_groups)} 个交易日")
     print(f"   测试集: {len(X_test)} 行 ({test_dates[0]} ~ {test_dates[1]}), {len(test_groups)} 个交易日")
+
+    # 关键校验：确保 Group 排序正确（XGBRanker 训练的核心前提）
+    print("\n🔍 Group 排序校验...")
+    train_valid = _validate_group_order(train_dates_series, train_groups, '训练集')
+    test_valid = _validate_group_order(test_dates_series, test_groups, '测试集')
+
+    if not train_valid or not test_valid:
+        return {'error': 'Group 排序校验失败，请检查数据排序逻辑'}
+
+    print(f"   训练集: {len(train_groups)} 个 group, 累计 {train_groups.sum()} 个样本")
+    print(f"   测试集: {len(test_groups)} 个 group, 累计 {test_groups.sum()} 个样本")
 
     # 6. GPU 检测和模型初始化
     gpu_available = _detect_gpu()

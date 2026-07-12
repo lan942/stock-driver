@@ -53,6 +53,7 @@ class StrategyBacktest:
         self.max_hold_days = max_hold_days or int(
             StrategyConfigService.get('max_hold_days') or 5
         )
+        self.force_close_method = StrategyConfigService.get('force_close_method') or 'day_n_close'
         self.position_ratio = position_ratio or float(
             StrategyConfigService.get('position_ratio') or 0.2
         )
@@ -360,9 +361,15 @@ class StrategyBacktest:
                     reason = 'atr_profit'
 
             # 3. 超时检测（第三优先级）
-            if sell_price is None and hold_days >= self.max_hold_days:
-                sell_price = stock.close
-                reason = 'timeout'
+            if sell_price is None:
+                if self.force_close_method == 'day_n_plus_1_open':
+                    if hold_days >= self.max_hold_days + 1:
+                        sell_price = stock.open
+                        reason = 'timeout_next_open'
+                else:
+                    if hold_days >= self.max_hold_days:
+                        sell_price = stock.close
+                        reason = 'timeout'
 
             if sell_price:
                 sold.append({

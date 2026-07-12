@@ -52,7 +52,8 @@ def compute_future_returns(
     df: pd.DataFrame,
     lookahead: int = 5,
     stop_profit_pct: float = 0.06,
-    stop_loss_pct: float = 0.03
+    stop_loss_pct: float = 0.03,
+    force_close_method: str = 'day_n_close'
 ) -> pd.DataFrame:
     """计算未来收益率（含动态止盈止损模拟）并剔除 T+1 一字板样本（per-stock）
 
@@ -67,13 +68,20 @@ def compute_future_returns(
     - T+1 至 T+lookahead 逐日扫描 high/low
     - 最高价触及止盈线 → 当日以 high 卖出（扣除摩擦成本）
     - 最低价触及止损线 → 当日以 low 卖出（扣除摩擦成本）
-    - 未触发 → T+lookahead 以 close 卖出（扣除摩擦成本）
+    - 未触发 → 强制时间平仓（见 force_close_method）
+
+    强制时间平仓（确保模型学习的时间周期与实盘策略完全一致）：
+    - day_n_close: 第 T+lookahead 天的收盘价（默认）
+    - day_n_plus_1_open: 第 T+lookahead+1 天的开盘价
 
     Args:
         df: 包含 'close', 'open', 'high', 'low' 列的特征 DataFrame（单只股票）
         lookahead: 预测窗口，未来 N 个交易日，默认 5
         stop_profit_pct: 止盈比例，默认 6%
         stop_loss_pct: 止损比例，默认 3%
+        force_close_method: 强制平仓方式
+            - 'day_n_close': 第 N 天收盘价（默认）
+            - 'day_n_plus_1_open': 第 N+1 天开盘价
 
     Returns:
         新增 'future_ret' 列的 DataFrame（已 dropna，无 label 列）
@@ -85,8 +93,8 @@ def compute_future_returns(
         if col not in df.columns:
             raise ValueError(f"DataFrame 缺少 '{col}' 列")
 
-    # 需要 lookahead+1 天的未来数据
-    if len(df) <= lookahead + 1:
+    required_future_days = lookahead + 2 if force_close_method == 'day_n_plus_1_open' else lookahead + 1
+    if len(df) <= required_future_days:
         return pd.DataFrame()
 
     df = df.copy()
@@ -107,26 +115,29 @@ def compute_future_returns(
     tradable = t1_open_ret < limit_up_pct
     df = df[tradable].copy()
 
-    if len(df) <= lookahead + 1:
+    if len(df) <= required_future_days:
         return pd.DataFrame()
 
     # T+1 开盘买入价（含买入摩擦成本）
     buy_price = df['open'].shift(-1) * (1 + 0.0015)
 
     # 模拟动态止盈止损离场路径
-    # 构建未来 lookahead 天的价格矩阵
+    # 构建未来 lookahead+1 天的价格矩阵（可能需要 T+N+1 天开盘价用于强制平仓）
     future_high = []
     future_low = []
     future_close = []
-    for i in range(1, lookahead + 1):
+    future_open = []
+    for i in range(1, lookahead + 2):
         future_high.append(df['high'].shift(-i))
         future_low.append(df['low'].shift(-i))
         future_close.append(df['close'].shift(-i))
+        future_open.append(df['open'].shift(-i))
 
     # 转换为 DataFrame，每行对应 T 日，每列对应 T+i 日
     future_high_df = pd.DataFrame(future_high).T
     future_low_df = pd.DataFrame(future_low).T
     future_close_df = pd.DataFrame(future_close).T
+    future_open_df = pd.DataFrame(future_open).T
 
     # 逐行计算实际离场价
     exit_prices = []
@@ -162,9 +173,12 @@ def compute_future_returns(
                 exited = True
                 break
 
-        # 未触发，到期以收盘价卖出
+        # 未触发，到期强制平仓
         if not exited:
-            exit_price = future_close_df.iloc[future_close_df.index.get_loc(idx), lookahead - 1]
+            if force_close_method == 'day_n_plus_1_open':
+                exit_price = future_open_df.iloc[future_open_df.index.get_loc(idx), lookahead]
+            else:
+                exit_price = future_close_df.iloc[future_close_df.index.get_loc(idx), lookahead - 1]
 
         exit_prices.append(exit_price)
 
