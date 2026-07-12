@@ -9,12 +9,16 @@
 from datetime import date, timedelta
 from typing import Optional
 
+import pandas as pd
+import numpy as np
+
 from backend.utils.db import get_db
 from backend.models.stock import Stock, StockDaily
 from backend.models.backtest import BacktestPortfolio, BacktestTransaction, BacktestCash
 from backend.services.strategy_config import StrategyConfigService
 from backend.services.strategies import get_strategy
 from backend.services import backtest_service
+from backend.services.ml.feature_engine import build_features
 
 
 class StrategyBacktest:
@@ -374,10 +378,7 @@ class StrategyBacktest:
     # ─── 生成推荐 ─────────────────────────────────────────
 
     def _generate_recommendations(self, trade_date: date, available_slots: int, available_cash: float) -> list:
-        """生成买入候选（T日收盘后生成，限价 = T日收盘价 × 1.01，T+1日开盘才成交）
-
-        批量评分优化：一次性获取所有股票数据，批量计算特征和预测评分，
-        大幅提升 GPU 利用率和回测速度。
+        """生成买入候选（一次 DB 查询 + 一次 build_features + 一次 GPU 预测）
 
         Args:
             trade_date: 生成推荐的交易日（T日），评分使用该日及之前的数据
@@ -391,27 +392,77 @@ class StrategyBacktest:
         db.close()
 
         score_as_of = trade_date + timedelta(days=1)
+        data_start = score_as_of - timedelta(days=60)
 
-        stocks_data = {}
-        for code in codes:
-            data = StrategyBacktest._get_stock_data_before_date(code, score_as_of, days=30)
-            if data is not None and data['latest'] is not None:
-                stocks_data[code] = data
+        # 一次 DB 查询获取所有股票数据
+        db = next(get_db())
+        rows = (
+            db.query(StockDaily)
+            .filter(StockDaily.date >= data_start, StockDaily.date < score_as_of)
+            .order_by(StockDaily.code, StockDaily.date)
+            .all()
+        )
+        db.close()
+
+        if not rows:
+            return []
+
+        # 转为 DataFrame
+        df = pd.DataFrame([{
+            'code': r.code, 'date': r.date,
+            'open': r.open, 'high': r.high, 'low': r.low,
+            'close': r.close, 'volume': r.volume,
+        } for r in rows])
+
+        # 保留每只股票最近 30 行
+        df = df.groupby('code').tail(30).copy()
+        code_counts = df.groupby('code').size()
+        valid_codes = set(code_counts[code_counts >= 30].index)
+
+        # 一次 build_features 计算全市场特征
+        features = build_features(df)
+
+        # 提取每只股票最后一行的特征
+        feature_cols = self.strategy._feature_cols
+        last_rows = features.drop_duplicates(subset=['code'], keep='last')
+
+        # 构建特征矩阵
+        X_rows = []
+        valid_records = []
+        for _, row in last_rows.iterrows():
+            code = row['code']
+            if code not in valid_codes:
+                continue
+
+            feat = {}
+            for col in feature_cols:
+                v = row.get(col, 0.0)
+                feat[col] = float(v) if pd.notna(v) else 0.0
+            X_rows.append(feat)
+            valid_records.append({'code': code, 'close': float(row.get('close', 0))})
+
+        if not X_rows:
+            return []
+
+        X = pd.DataFrame(X_rows).fillna(0).replace([np.inf, -np.inf], 0)
+        X = X.values.astype(np.float32)
+
+        # 一次 GPU/CPU 批量预测
+        if hasattr(self.strategy, '_gpu_worker') and self.strategy._gpu_worker:
+            scores = self.strategy._gpu_worker.predict(X)
+        elif hasattr(self.strategy, '_cpu_model') and self.strategy._cpu_model:
+            scores = self.strategy._cpu_model.predict(X)
+        else:
+            return []
 
         scored = []
-        if hasattr(self.strategy, 'batch_score_from_data'):
-            batch_results = self.strategy.batch_score_from_data(stocks_data)
-            for code, r in batch_results.items():
-                if r is None:
-                    continue
-                data = stocks_data[code]
-                if not self.strategy._is_limit_up_down(data['latest']):
-                    scored.append(r)
-        else:
-            for code in codes:
-                r = self._score_stock_for_date(code, score_as_of)
-                if r:
-                    scored.append(r)
+        for i, rec in enumerate(valid_records):
+            scored.append({
+                'code': rec['code'],
+                'total_score': float(scores[i]),
+                'factor_scores': {'xgboost_prob': float(scores[i])},
+                'latest_close': rec['close'],
+            })
 
         scored.sort(key=lambda x: x['total_score'], reverse=True)
 
