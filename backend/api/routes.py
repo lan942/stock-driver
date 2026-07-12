@@ -186,7 +186,7 @@ def get_stock(code):
 def get_stock_transactions(code):
     """获取股票的回测和实盘交易记录"""
     backtest_tx = backtest_get_transactions_by_code(code)
-    portfolio_tx = get_transactions_by_code(code)
+    portfolio_tx = backtest_get_transactions_by_code(code)
 
     return jsonify({
         'backtest': backtest_tx,
