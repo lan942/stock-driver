@@ -29,6 +29,7 @@ DEFAULT_CONFIGS = {
     'dynamic_sell_percentile_threshold': {'value': '0.30', 'description': '动态卖出百分位阈值（跌出全市场前N%则卖出）'},
     'dynamic_sell_score_decline_days': {'value': '2', 'description': '动态卖出连续下降天数（连续N天评分下降则卖出）'},
     'dynamic_sell_score_absolute_threshold': {'value': '0.30', 'description': '动态卖出绝对分阈值（评分低于此值则卖出）'},
+    'dynamic_sell_min_hold_days': {'value': '2', 'description': '动态卖出最小持仓天数（买入后N天内不触发评分卖出）'},
 }
 
 
@@ -65,7 +66,7 @@ class StrategyConfigService:
                 return float(raw)
             except ValueError:
                 return raw
-        if key in ('max_positions', 'adaptive_min_days', 'atr_period', 'dynamic_sell_score_decline_days'):
+        if key in ('max_positions', 'adaptive_min_days', 'atr_period', 'dynamic_sell_score_decline_days', 'dynamic_sell_min_hold_days'):
             try:
                 return int(raw)
             except ValueError:

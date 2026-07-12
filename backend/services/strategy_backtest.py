@@ -76,6 +76,9 @@ class StrategyBacktest:
         self.dynamic_sell_score_absolute_threshold = float(
             StrategyConfigService.get('dynamic_sell_score_absolute_threshold') or 0.30
         )
+        self.dynamic_sell_min_hold_days = int(
+            StrategyConfigService.get('dynamic_sell_min_hold_days') or 2
+        )
 
         # 自适应参数：根据收益进度动态调整选股门槛和仓位
         self.target_annual_return = float(
@@ -414,29 +417,30 @@ class StrategyBacktest:
                         sell_price = stock.close
                         reason = 'timeout'
 
-            # 4. 动态评分卖出（第四优先级）
+            # 4. 动态评分卖出（第四优先级，至少持有 min_hold 天后才生效）
             if sell_price is None and self.dynamic_sell_enabled and all_scores:
-                code = pos['code']
-                current_score = None
-                for s in all_scores:
-                    if s['code'] == code:
-                        current_score = s['total_score']
-                        break
+                if hold_days >= self.dynamic_sell_min_hold_days:
+                    code = pos['code']
+                    current_score = None
+                    for s in all_scores:
+                        if s['code'] == code:
+                            current_score = s['total_score']
+                            break
 
-                if current_score is not None:
-                    # 4a. 评分跌出全市场阈值百分位
-                    percentile = self._compute_score_percentile(all_scores, code)
-                    if percentile is not None and percentile < self.dynamic_sell_percentile_threshold:
-                        sell_price = stock.close
-                        reason = 'dynamic_score_low'
-                    # 4b. 连续 N 天评分下降
-                    elif self._check_score_decline(code, current_score):
-                        sell_price = stock.close
-                        reason = 'dynamic_score_decline'
-                    # 4c. 评分低于绝对阈值
-                    elif current_score < self.dynamic_sell_score_absolute_threshold:
-                        sell_price = stock.close
-                        reason = 'dynamic_score_low'
+                    if current_score is not None:
+                        # 4a. 评分跌出全市场阈值百分位
+                        percentile = self._compute_score_percentile(all_scores, code)
+                        if percentile is not None and percentile < self.dynamic_sell_percentile_threshold:
+                            sell_price = stock.close
+                            reason = 'dynamic_score_low'
+                        # 4b. 连续 N 天评分下降
+                        elif self._check_score_decline(code, current_score):
+                            sell_price = stock.close
+                            reason = 'dynamic_score_decline'
+                        # 4c. 评分低于绝对阈值
+                        elif current_score < self.dynamic_sell_score_absolute_threshold:
+                            sell_price = stock.close
+                            reason = 'dynamic_score_low'
 
             if sell_price:
                 sold.append({
