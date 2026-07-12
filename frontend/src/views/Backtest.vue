@@ -188,6 +188,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="reason" label="卖出理由" width="140" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.type === 'sell' && row.reason" size="small" type="info">
+              {{ reasonLabel(row.reason) }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="trade_date" label="交易日期" width="110">
           <template #default="{ row }">
             {{ row.trade_date || '-' }}
@@ -415,6 +423,22 @@ const safeFixed = (val, digits = 2) => {
 const safeLocale = (val) => {
   if (val === null || val === undefined) return '0'
   return val.toLocaleString()
+}
+
+const REASON_LABELS = {
+  stop_loss: '比例止损',
+  atr_loss: 'ATR止损',
+  take_profit: '比例止盈',
+  atr_profit: 'ATR止盈',
+  timeout: '超时卖出',
+  timeout_next_open: '超时卖出',
+  force_close: '强制清仓',
+  dynamic_score_low: '评分过低',
+  dynamic_score_decline: '评分连降',
+}
+
+const reasonLabel = (reason) => {
+  return REASON_LABELS[reason] || reason
 }
 
 const disableFutureDate = (time) => {

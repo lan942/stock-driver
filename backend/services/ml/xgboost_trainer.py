@@ -339,12 +339,16 @@ def _build_feature_label_dataframe(
             stop_profit_pct = float(StrategyConfigService.get('stop_profit_pct') or 0.06)
             stop_loss_pct = float(StrategyConfigService.get('stop_loss_pct') or 0.03)
             force_close_method = StrategyConfigService.get('force_close_method') or 'day_n_close'
+            dynamic_sell_enabled = (StrategyConfigService.get('dynamic_sell_enabled') or 'true').lower() == 'true'
+            dynamic_sell_decline_days = int(StrategyConfigService.get('dynamic_sell_score_decline_days') or 2)
             with_returns = compute_future_returns(
                 feats,
                 lookahead=lookahead,
                 stop_profit_pct=stop_profit_pct,
                 stop_loss_pct=stop_loss_pct,
-                force_close_method=force_close_method
+                force_close_method=force_close_method,
+                dynamic_sell_enabled=dynamic_sell_enabled,
+                dynamic_sell_decline_days=dynamic_sell_decline_days,
             )
             if with_returns.empty:
                 continue

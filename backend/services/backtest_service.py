@@ -241,6 +241,7 @@ def get_transactions_by_code(code: str) -> List[Dict[str, Any]]:
             'open_price': round(tx.open_price, 2) if tx.open_price is not None else None,
             'close_price': round(tx.close_price, 2) if tx.close_price is not None else None,
             'profit_pct': round(tx.profit_pct, 2) if tx.profit_pct is not None else None,
+            'reason': tx.reason,
         })
 
     db.close()
@@ -274,6 +275,7 @@ def get_transactions(limit: int = 50) -> List[Dict[str, Any]]:
             'close_price': round(tx.close_price, 2) if tx.close_price is not None else None,
             'equity_after': round(tx.equity_after, 2) if tx.equity_after is not None else None,
             'profit_pct': round(tx.profit_pct, 2) if tx.profit_pct is not None else None,
+            'reason': tx.reason,
             'created_at': tx.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
 
@@ -291,6 +293,7 @@ def add_transaction(
     close_price: Optional[float] = None,
     equity_after: Optional[float] = None,
     profit_pct: Optional[float] = None,
+    reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """添加回测交易记录"""
     # 验证数量必须是100的整数倍
@@ -366,6 +369,7 @@ def add_transaction(
         close_price=close_price,
         equity_after=equity_after,
         profit_pct=profit_pct,
+        reason=reason,
     )
     db.add(transaction)
     db.commit()
@@ -386,6 +390,7 @@ def add_transaction(
         'close_price': round(transaction.close_price, 2) if transaction.close_price is not None else None,
         'equity_after': round(transaction.equity_after, 2) if transaction.equity_after is not None else None,
         'profit_pct': round(transaction.profit_pct, 2) if transaction.profit_pct is not None else None,
+        'reason': transaction.reason,
         'created_at': transaction.created_at.strftime('%Y-%m-%d %H:%M:%S')
     }
 

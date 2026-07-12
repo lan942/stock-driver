@@ -25,6 +25,10 @@ DEFAULT_CONFIGS = {
     'atr_period': {'value': '14', 'description': 'ATR计算周期'},
     'atr_profit_multiplier': {'value': '2.0', 'description': 'ATR止盈倍数（涨超N倍ATR卖出）'},
     'atr_loss_multiplier': {'value': '1.0', 'description': 'ATR止损倍数（跌超N倍ATR卖出）'},
+    'dynamic_sell_enabled': {'value': 'true', 'description': '启用动态评分卖出（持仓期重新评分，分数恶化则卖出）'},
+    'dynamic_sell_percentile_threshold': {'value': '0.30', 'description': '动态卖出百分位阈值（跌出全市场前N%则卖出）'},
+    'dynamic_sell_score_decline_days': {'value': '2', 'description': '动态卖出连续下降天数（连续N天评分下降则卖出）'},
+    'dynamic_sell_score_absolute_threshold': {'value': '0.30', 'description': '动态卖出绝对分阈值（评分低于此值则卖出）'},
 }
 
 
@@ -55,12 +59,13 @@ class StrategyConfigService:
                     'max_hold_days', 'position_ratio',
                     'adaptive_score_threshold_behind', 'adaptive_score_threshold_near', 'adaptive_score_threshold_met',
                     'adaptive_position_ratio_behind', 'adaptive_position_ratio_near', 'adaptive_position_ratio_met',
-                    'atr_profit_multiplier', 'atr_loss_multiplier'):
+                    'atr_profit_multiplier', 'atr_loss_multiplier',
+                    'dynamic_sell_percentile_threshold', 'dynamic_sell_score_absolute_threshold'):
             try:
                 return float(raw)
             except ValueError:
                 return raw
-        if key in ('max_positions', 'adaptive_min_days', 'atr_period'):
+        if key in ('max_positions', 'adaptive_min_days', 'atr_period', 'dynamic_sell_score_decline_days'):
             try:
                 return int(raw)
             except ValueError:

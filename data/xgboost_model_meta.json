@@ -51,7 +51,7 @@
     "4": 29031
   },
   "label_method": "cross_sectional_qcut",
-  "trained_at": "2026-07-12T17:13:35.313700",
+  "trained_at": "2026-07-12T17:18:51.314972",
   "gpu_used": true,
   "n_estimators": 200,
   "max_depth": 5,

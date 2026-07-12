@@ -37,6 +37,7 @@ class BacktestTransaction(Base):
     close_price = Column(Float)
     equity_after = Column(Float)
     profit_pct = Column(Float)
+    reason = Column(String(50))
     created_at = Column(DateTime, server_default=func.now())
 
 

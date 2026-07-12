@@ -65,6 +65,18 @@ class StrategyBacktest:
         self.atr_profit_multiplier = float(StrategyConfigService.get('atr_profit_multiplier') or 2.0)
         self.atr_loss_multiplier = float(StrategyConfigService.get('atr_loss_multiplier') or 1.0)
 
+        # 动态评分卖出参数
+        self.dynamic_sell_enabled = (StrategyConfigService.get('dynamic_sell_enabled') or 'true').lower() == 'true'
+        self.dynamic_sell_percentile_threshold = float(
+            StrategyConfigService.get('dynamic_sell_percentile_threshold') or 0.30
+        )
+        self.dynamic_sell_score_decline_days = int(
+            StrategyConfigService.get('dynamic_sell_score_decline_days') or 2
+        )
+        self.dynamic_sell_score_absolute_threshold = float(
+            StrategyConfigService.get('dynamic_sell_score_absolute_threshold') or 0.30
+        )
+
         # 自适应参数：根据收益进度动态调整选股门槛和仓位
         self.target_annual_return = float(
             StrategyConfigService.get('target_annual_return') or 0.15
@@ -90,6 +102,9 @@ class StrategyBacktest:
         # 仅用于收益曲线，不入库
         self.daily_records = []
 
+        # 持仓评分追踪：{code: [score_day1, score_day2, ...]} 用于检测连续下降
+        self._position_scores = {}
+
     # ─── 清空历史回测数据 ──────────────────────────────────
 
     @staticmethod
@@ -107,6 +122,10 @@ class StrategyBacktest:
             'deleted_positions': pos_count,
             'deleted_transactions': tx_count,
         }
+
+    def _reset_position_scores(self):
+        """重置持仓评分追踪"""
+        self._position_scores = {}
 
     # ─── 自适应参数计算 ──────────────────────────────────
 
@@ -139,25 +158,30 @@ class StrategyBacktest:
         """
         progress, annualized, days = self._compute_progress()
 
+        # 自适应仓位比例以用户设置的 position_ratio 为基准等比缩放
+        # 默认 position_ratio=0.20 时，自适应档位：behind=0.10, near=0.15, met=0.20
+        # 当用户设置 position_ratio=0.50 时：behind=0.25, near=0.375, met=0.50
+        ratio_scale = self.position_ratio / 0.20
+
         # 预热期：使用达标档参数（CAGR噪声太大）
         if days < self.adaptive_min_days:
             self._adaptive_score_threshold = self.adaptive_thresholds['met']
-            self._adaptive_position_ratio = self.adaptive_ratios['met']
+            self._adaptive_position_ratio = round(self.adaptive_ratios['met'] * ratio_scale, 4)
             self._current_tier = 'warmup'
             return 'warmup'
 
         # 三档调整
         if progress < 0.5:
             self._adaptive_score_threshold = self.adaptive_thresholds['behind']
-            self._adaptive_position_ratio = self.adaptive_ratios['behind']
+            self._adaptive_position_ratio = round(self.adaptive_ratios['behind'] * ratio_scale, 4)
             self._current_tier = 'behind'
         elif progress < 1.0:
             self._adaptive_score_threshold = self.adaptive_thresholds['near']
-            self._adaptive_position_ratio = self.adaptive_ratios['near']
+            self._adaptive_position_ratio = round(self.adaptive_ratios['near'] * ratio_scale, 4)
             self._current_tier = 'near'
         else:
             self._adaptive_score_threshold = self.adaptive_thresholds['met']
-            self._adaptive_position_ratio = self.adaptive_ratios['met']
+            self._adaptive_position_ratio = round(self.adaptive_ratios['met'] * ratio_scale, 4)
             self._current_tier = 'met'
 
         return self._current_tier
@@ -296,13 +320,31 @@ class StrategyBacktest:
 
     # ─── 卖出检测 ─────────────────────────────────────────
 
-    def _check_sell_for_day(self, day: date, day_data: dict) -> list:
+    @staticmethod
+    def _count_hold_trading_days(trading_days: list, buy_date: date, current_date: date) -> int:
+        """计算从买入日到当日的持仓交易日数
+
+        Args:
+            trading_days: 排序后的交易日列表
+            buy_date: 买入日期
+            current_date: 当前日期
+
+        Returns:
+            持仓交易日数（不含买入日，含当前日）
+        """
+        if not trading_days:
+            return (current_date - buy_date).days
+        return sum(1 for d in trading_days if buy_date < d <= current_date)
+
+    def _check_sell_for_day(self, day: date, day_data: dict, trading_days: list = None,
+                             all_scores: list = None) -> list:
         """检测当日持仓是否触发卖出（使用 high/low）
         
         卖出优先级（从高到低）：
         1. 止损（配置止损比例 或 ATR止损，取较小值）
         2. 止盈（配置止盈比例 或 ATR止盈，取较小值）
-        3. 超时（持仓天数达到上限）
+        3. 超时（持仓天数达到上限，按交易日计算）
+        4. 动态评分卖出（模型置信度下降：百分位跌出阈值 或 连续 N 天评分下降）
         
         ATR止盈止损逻辑：
         - ATR止盈：成本价 + N倍ATR，超过则卖出
@@ -317,7 +359,8 @@ class StrategyBacktest:
             if not stock or pos['buy_date'] is None:
                 continue
 
-            hold_days = (day - pos['buy_date']).days
+            # 按交易日计算持仓天数
+            hold_days = self._count_hold_trading_days(trading_days, pos['buy_date'], day)
             if hold_days < 1:
                 continue  # T+1 保护
 
@@ -371,6 +414,30 @@ class StrategyBacktest:
                         sell_price = stock.close
                         reason = 'timeout'
 
+            # 4. 动态评分卖出（第四优先级）
+            if sell_price is None and self.dynamic_sell_enabled and all_scores:
+                code = pos['code']
+                current_score = None
+                for s in all_scores:
+                    if s['code'] == code:
+                        current_score = s['total_score']
+                        break
+
+                if current_score is not None:
+                    # 4a. 评分跌出全市场阈值百分位
+                    percentile = self._compute_score_percentile(all_scores, code)
+                    if percentile is not None and percentile < self.dynamic_sell_percentile_threshold:
+                        sell_price = stock.close
+                        reason = 'dynamic_score_low'
+                    # 4b. 连续 N 天评分下降
+                    elif self._check_score_decline(code, current_score):
+                        sell_price = stock.close
+                        reason = 'dynamic_score_decline'
+                    # 4c. 评分低于绝对阈值
+                    elif current_score < self.dynamic_sell_score_absolute_threshold:
+                        sell_price = stock.close
+                        reason = 'dynamic_score_low'
+
             if sell_price:
                 sold.append({
                     'code': pos['code'],
@@ -382,26 +449,24 @@ class StrategyBacktest:
 
         return sold
 
-    # ─── 生成推荐 ─────────────────────────────────────────
+    # ─── 全市场评分 ─────────────────────────────────────────
 
-    def _generate_recommendations(self, trade_date: date, available_slots: int, available_cash: float) -> list:
-        """生成买入候选（一次 DB 查询 + 一次 build_features + 一次 GPU 预测）
+    def _score_all_market_stocks(self, trade_date: date) -> list:
+        """全市场批量评分（一次 DB 查询 + 一次 build_features + 一次 GPU 预测）
 
         Args:
-            trade_date: 生成推荐的交易日（T日），评分使用该日及之前的数据
-        """
-        if available_slots <= 0:
-            return []
+            trade_date: 评分基准日（T日），评分使用该日及之前的数据
 
+        Returns:
+            评分列表 [{code, total_score, latest_close}, ...]，按 score 降序排列
+        """
         db = next(get_db())
         codes = [row[0] for row in db.query(Stock.code).all()]
-        stock_names = {s.code: s.name for s in db.query(Stock.code, Stock.name).all()}
         db.close()
 
         score_as_of = trade_date + timedelta(days=1)
         data_start = score_as_of - timedelta(days=60)
 
-        # 一次 DB 查询获取所有股票数据
         db = next(get_db())
         rows = (
             db.query(StockDaily)
@@ -414,33 +479,26 @@ class StrategyBacktest:
         if not rows:
             return []
 
-        # 转为 DataFrame
         df = pd.DataFrame([{
             'code': r.code, 'date': r.date,
             'open': r.open, 'high': r.high, 'low': r.low,
             'close': r.close, 'volume': r.volume,
         } for r in rows])
 
-        # 保留每只股票最近 30 行
         df = df.groupby('code').tail(30).copy()
         code_counts = df.groupby('code').size()
         valid_codes = set(code_counts[code_counts >= 30].index)
 
-        # 一次 build_features 计算全市场特征
         features = build_features(df)
-
-        # 提取每只股票最后一行的特征
         feature_cols = self.strategy._feature_cols
         last_rows = features.drop_duplicates(subset=['code'], keep='last')
 
-        # 构建特征矩阵
         X_rows = []
         valid_records = []
         for _, row in last_rows.iterrows():
             code = row['code']
             if code not in valid_codes:
                 continue
-
             feat = {}
             for col in feature_cols:
                 v = row.get(col, 0.0)
@@ -454,7 +512,6 @@ class StrategyBacktest:
         X = pd.DataFrame(X_rows).fillna(0).replace([np.inf, -np.inf], 0)
         X = X.values.astype(np.float32)
 
-        # 一次 GPU/CPU 批量预测
         if hasattr(self.strategy, '_gpu_worker') and self.strategy._gpu_worker:
             scores = self.strategy._gpu_worker.predict(X)
         elif hasattr(self.strategy, '_cpu_model') and self.strategy._cpu_model:
@@ -472,9 +529,89 @@ class StrategyBacktest:
             })
 
         scored.sort(key=lambda x: x['total_score'], reverse=True)
+        return scored
+
+    def _build_score_map(self, all_scores: list) -> dict:
+        """将全市场评分列表转为 {code: total_score} 字典"""
+        return {s['code']: s['total_score'] for s in all_scores}
+
+    def _compute_score_percentile(self, all_scores: list, code: str) -> Optional[float]:
+        """计算某只股票在全市场中的评分百分位（0=最差, 1=最好）
+
+        Args:
+            all_scores: 全市场评分列表（已排序）
+            code: 股票代码
+
+        Returns:
+            百分位值（0~1），找不到返回 None
+        """
+        if not all_scores:
+            return None
+        score_map = {s['code']: s['total_score'] for s in all_scores}
+        score = score_map.get(code)
+        if score is None:
+            return None
+        # 统计低于当前 score 的数量
+        below = sum(1 for s in all_scores if s['total_score'] < score)
+        return below / len(all_scores)
+
+    def _check_score_decline(self, code: str, current_score: float) -> bool:
+        """检查持仓评分是否连续下降
+
+        Args:
+            code: 股票代码
+            current_score: 当日最新评分
+
+        Returns:
+            True 表示触发连续下降卖出
+        """
+        scores = self._position_scores.get(code, [])
+        if len(scores) < self.dynamic_sell_score_decline_days:
+            return False
+        # 检查最近 N 天是否连续下降
+        recent = scores[-self.dynamic_sell_score_decline_days:]
+        for i in range(1, len(recent)):
+            if recent[i] >= recent[i - 1]:
+                return False
+        # 还要确认今天也比最后一天低
+        return current_score < scores[-1]
+
+    def _record_position_score(self, code: str, score: float):
+        """记录持仓评分（用于检测连续下降）"""
+        if code not in self._position_scores:
+            self._position_scores[code] = []
+        self._position_scores[code].append(score)
+
+    # ─── 生成推荐 ─────────────────────────────────────────
+
+    def _generate_recommendations(self, trade_date: date, available_slots: int,
+                                   total_equity: float, available_cash: float,
+                                   all_scores: list = None) -> list:
+        """生成买入候选
+
+        如果提供 all_scores，直接使用预计算的全市场评分（避免重复计算）；
+        否则自行计算（兼容旧调用路径）。
+
+        Args:
+            trade_date: 生成推荐的交易日（T日）
+            total_equity: 当前总资产
+            available_cash: 当前可用现金
+            all_scores: 可选，预计算的全市场评分列表
+        """
+        if available_slots <= 0:
+            return []
+
+        if all_scores is None:
+            all_scores = self._score_all_market_stocks(trade_date)
+        if not all_scores:
+            return []
+
+        db = next(get_db())
+        stock_names = {s.code: s.name for s in db.query(Stock.code, Stock.name).all()}
+        db.close()
 
         recs = []
-        for s in scored:
+        for s in all_scores:
             if len(recs) >= available_slots:
                 break
             if s['total_score'] < self._adaptive_score_threshold:
@@ -483,7 +620,7 @@ class StrategyBacktest:
             if not close or close <= 0:
                 continue
             limit_price = round(close * 1.01, 2)
-            alloc = available_cash * self._adaptive_position_ratio
+            alloc = total_equity * self._adaptive_position_ratio
             if alloc < limit_price * 100:
                 continue
             recs.append({
@@ -502,7 +639,8 @@ class StrategyBacktest:
     def _execute_pending_buys(self, day: date, day_data: dict, pending: list) -> int:
         """执行待成交买入：以当日 open 成交，open > 限价则放弃
 
-        买入数量按可分配资金动态计算，必须是 100 的整数倍（A股最小交易单位），
+        每只股票的买入金额 = 总资产 × 仓位比例（同一批买入基于相同的总资产计算），
+        实际买入数量必须是 100 的整数倍（A股最小交易单位），
         且总花费不超过可用现金。每笔成交后记录当日开收盘价和交易后权益。
 
         Args:
@@ -520,6 +658,13 @@ class StrategyBacktest:
         used_slots = len(positions)
         available_slots = self.max_positions - used_slots
         available_cash = backtest_service.get_cash_balance()
+        # 计算当前总资产 = 现金 + 持仓市值（基于当日收盘价）
+        positions_value = 0.0
+        for pos in positions:
+            stock = day_data.get(pos['code'])
+            if stock and stock.close:
+                positions_value += stock.close * pos['quantity']
+        total_equity = available_cash + positions_value
         executed = 0
 
         for rec in pending:
@@ -532,8 +677,8 @@ class StrategyBacktest:
             if stock.open > rec['limit_price']:
                 continue
             buy_price = stock.open
-            # 可分配资金 = 可用现金 × 仓位比例（用生成日的自适应比例）
-            alloc = available_cash * rec.get('position_ratio', self.position_ratio)
+            # 每只股票的买入金额 = 总资产 × 仓位比例（同一批次独立计算，不逐只扣减）
+            alloc = total_equity * rec.get('position_ratio', self.position_ratio)
             # 计算可买股数（必须是 100 的整数倍）
             quantity = int(alloc / buy_price) // 100 * 100
             if quantity < 100:
@@ -598,6 +743,7 @@ class StrategyBacktest:
             return {'error': '指定日期范围内无交易数据'}
 
         self.daily_records = []
+        self._position_scores = {}
         sell_log = []  # 交易明细
         pending_recs = []  # T 日生成的候选，T+1 日开盘成交
 
@@ -611,8 +757,11 @@ class StrategyBacktest:
 
             available_cash = backtest_service.get_cash_balance()
 
-            # 1. 检测卖出
-            sell_items = self._check_sell_for_day(day, day_data)
+            # 0. 全市场评分（一次 GPU 预测，同时用于卖出检测和买入候选）
+            all_scores = self._score_all_market_stocks(day)
+
+            # 1. 检测卖出（含动态评分卖出）
+            sell_items = self._check_sell_for_day(day, day_data, trading_days, all_scores)
             for item in sell_items:
                 stock = day_data.get(item['code'])
                 profit_pct = round(
@@ -627,6 +776,7 @@ class StrategyBacktest:
                     open_price=stock.open if stock else None,
                     close_price=stock.close if stock else None,
                     profit_pct=profit_pct,
+                    reason=item['reason'],
                 )
                 amount = round(item['sell_price'] * item['quantity'], 2)
                 backtest_service.update_cash(amount)
@@ -646,6 +796,19 @@ class StrategyBacktest:
                     'date': day.strftime('%Y-%m-%d'),
                     'reason': item['reason'],
                 })
+                # 清仓后清理该股票的评分追踪
+                self._position_scores.pop(item['code'], None)
+
+            # 1b. 记录剩余持仓的当日评分（用于下次检测连续下降）
+            if all_scores:
+                score_map = self._build_score_map(all_scores)
+                positions = self._get_db_positions()
+                sold_codes = {s['code'] for s in sell_items}
+                for pos in positions:
+                    if pos['code'] not in sold_codes:
+                        score = score_map.get(pos['code'])
+                        if score is not None:
+                            self._record_position_score(pos['code'], score)
 
             # 2. 执行昨日候选的买入（T+1 日开盘成交，超限价放弃）
             self._execute_pending_buys(day, day_data, pending_recs)
@@ -657,8 +820,15 @@ class StrategyBacktest:
                 positions = self._get_db_positions()
                 available_slots = self.max_positions - len(positions)
                 available_cash = backtest_service.get_cash_balance()
+                # 计算总资产（现金 + 持仓市值，用于仓位计算）
+                positions_value = 0.0
+                for pos in positions:
+                    stock = day_data.get(pos['code'])
+                    if stock and stock.close:
+                        positions_value += stock.close * pos['quantity']
+                total_equity = available_cash + positions_value
                 if available_slots > 0 and available_cash > 0:
-                    pending_recs = self._generate_recommendations(day, available_slots, available_cash)
+                    pending_recs = self._generate_recommendations(day, available_slots, total_equity, available_cash, all_scores)
 
             # 4. 记录当日权益
             positions = self._get_db_positions()
@@ -700,7 +870,8 @@ class StrategyBacktest:
 
             for day in post_days:
                 day_data = self._get_stock_data_for_date(day)
-                sell_items = self._check_sell_for_day(day, day_data)
+                all_scores = self._score_all_market_stocks(day)
+                sell_items = self._check_sell_for_day(day, day_data, trading_days + post_days, all_scores)
                 for item in sell_items:
                     stock = day_data.get(item['code'])
                     profit_pct = round(
@@ -715,6 +886,7 @@ class StrategyBacktest:
                         open_price=stock.open if stock else None,
                         close_price=stock.close if stock else None,
                         profit_pct=profit_pct,
+                        reason=item['reason'],
                     )
                     amount = round(item['sell_price'] * item['quantity'], 2)
                     backtest_service.update_cash(amount)
@@ -734,6 +906,18 @@ class StrategyBacktest:
                         'date': day.strftime('%Y-%m-%d'),
                         'reason': item['reason'],
                     })
+                    self._position_scores.pop(item['code'], None)
+
+                # 记录剩余持仓评分
+                if all_scores:
+                    score_map = self._build_score_map(all_scores)
+                    positions = self._get_db_positions()
+                    sold_codes = {s['code'] for s in sell_items}
+                    for pos in positions:
+                        if pos['code'] not in sold_codes:
+                            score = score_map.get(pos['code'])
+                            if score is not None:
+                                self._record_position_score(pos['code'], score)
 
                 # 记录当日权益
                 positions = self._get_db_positions()
@@ -775,6 +959,7 @@ class StrategyBacktest:
                         open_price=stock.open if stock else None,
                         close_price=stock.close if stock else None,
                         profit_pct=profit_pct,
+                        reason='force_close',
                     )
                     amount = round(sell_price * pos['quantity'], 2)
                     backtest_service.update_cash(amount)
