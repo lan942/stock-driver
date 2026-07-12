@@ -97,7 +97,11 @@ def compute_future_returns(df: pd.DataFrame, lookahead: int = 5) -> pd.DataFrame
 
     # T 日产生信号 → T+1 开盘买入 → T+lookahead 收盘卖出
     # future_ret = 卖出价 / 买入价 - 1
-    df['future_ret'] = df['close'].shift(-lookahead) / df['open'].shift(-1) - 1
+    # 加入双边摩擦成本：买入+0.15%（佣金+滑点），卖出-0.15%（印花税+佣金+滑点），总计约0.3%
+    # 更贴近实盘，避免模型高估收益
+    buy_price = df['open'].shift(-1) * (1 + 0.0015)
+    sell_price = df['close'].shift(-lookahead) * (1 - 0.0015)
+    df['future_ret'] = sell_price / buy_price - 1
 
     # 丢弃最后 lookahead+1 天无法计算未来收益的行
     return df.dropna()

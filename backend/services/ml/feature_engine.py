@@ -4,9 +4,11 @@
 
 核心特征：
 - ret_1d / ret_5d: 对数收益率（消除价格量纲差异）
-- volatility_10d: 过去 10 日收益率标准差
+- volatility_5d / volatility_10d: 过去 N 日收益率标准差
 - vol_change_1d: 成交量相对变化率
-- bias_20d: 收盘价偏离 20 日均线百分比
+- turnover: 成交额 = close * volume（流动性代理指标）
+- turnover_change_1d: 成交额变化率
+- bias_3d / bias_5d / bias_20d: 收盘价偏离 N 日均线百分比
 - amplitude: 日内振幅 (high - low) / prev_close
 - close_shadow: 收盘留影 (close - open) / (high - low)
 """
@@ -58,6 +60,9 @@ def build_features(
         result['ret_5d'] = np.log(result['close'] / grouped['close'].shift(5))
 
         # 波动率特征：groupby + rolling 返回 MultiIndex，droplevel 对齐回原索引
+        result['volatility_5d'] = (
+            grouped['ret_1d'].rolling(window=5).std().droplevel(0)
+        )
         result['volatility_10d'] = (
             grouped['ret_1d'].rolling(window=10).std().droplevel(0)
         )
@@ -65,8 +70,16 @@ def build_features(
         # 量价特征
         result['vol_change_1d'] = result['volume'] / grouped['volume'].shift(1) - 1
 
-        # 均线偏离度
+        # 成交额特征（流动性代理指标）
+        result['turnover'] = result['close'] * result['volume']
+        result['turnover_change_1d'] = result['turnover'] / grouped['turnover'].shift(1) - 1
+
+        # 均线偏离度（多时间窗口）
+        sma_3 = grouped['close'].rolling(window=3).mean().droplevel(0)
+        sma_5 = grouped['close'].rolling(window=5).mean().droplevel(0)
         sma_20 = grouped['close'].rolling(window=20).mean().droplevel(0)
+        result['bias_3d'] = (result['close'] - sma_3) / sma_3
+        result['bias_5d'] = (result['close'] - sma_5) / sma_5
         result['bias_20d'] = (result['close'] - sma_20) / sma_20
 
         # 日内特征
@@ -81,9 +94,20 @@ def build_features(
         # 单只股票：直接 shift/rolling
         result['ret_1d'] = np.log(result['close'] / result['close'].shift(1))
         result['ret_5d'] = np.log(result['close'] / result['close'].shift(5))
+        result['volatility_5d'] = result['ret_1d'].rolling(window=5).std()
         result['volatility_10d'] = result['ret_1d'].rolling(window=10).std()
         result['vol_change_1d'] = result['volume'] / result['volume'].shift(1) - 1
+
+        # 成交额特征
+        result['turnover'] = result['close'] * result['volume']
+        result['turnover_change_1d'] = result['turnover'] / result['turnover'].shift(1) - 1
+
+        # 均线偏离度（多时间窗口）
+        sma_3 = result['close'].rolling(window=3).mean()
+        sma_5 = result['close'].rolling(window=5).mean()
         sma_20 = result['close'].rolling(window=20).mean()
+        result['bias_3d'] = (result['close'] - sma_3) / sma_3
+        result['bias_5d'] = (result['close'] - sma_5) / sma_5
         result['bias_20d'] = (result['close'] - sma_20) / sma_20
 
         # 日内特征

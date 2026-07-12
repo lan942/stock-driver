@@ -25,9 +25,25 @@ from backend.services.ml.feature_engine import build_features
 from backend.services.ml.label_generator import assign_labels, compute_future_returns
 
 # 默认特征列
+# 量价特征（per-stock，在 build_features 中计算）
 DEFAULT_FEATURE_COLS = [
-    'ret_1d', 'ret_5d', 'volatility_10d', 'vol_change_1d', 'bias_20d',
+    'ret_1d', 'ret_5d',
+    'volatility_5d', 'volatility_10d',
+    'vol_change_1d',
+    'turnover', 'turnover_change_1d',
+    'bias_3d', 'bias_5d', 'bias_20d',
     'amplitude', 'close_shadow',
+]
+
+# 横截面相对特征（全市场合并后计算）
+CROSS_SECTIONAL_FEATURES = [
+    'ret_1d_rel',          # 相对收益率 = ret_1d - 当日全市场平均
+    'volatility_5d_rel',   # 相对波动率
+    'volatility_10d_rel',  # 相对波动率
+    'vol_change_1d_rel',   # 相对成交量变化
+    'turnover_rel',        # 相对成交额（除以当日中位数）
+    'amplitude_rel',       # 相对日内振幅
+    'close_shadow_rel',    # 相对收盘留影
 ]
 
 # 模型和元信息存储路径
@@ -160,6 +176,58 @@ def _build_group_array(dates: pd.Series) -> np.ndarray:
     return dates.groupby(dates.values).size().values
 
 
+def _add_cross_sectional_features(df: pd.DataFrame) -> pd.DataFrame:
+    """添加横截面相对特征（全市场合并后计算）
+
+    A 股是典型的资金博弈市，单纯的绝对特征不如相对特征有区分度。
+    通过将个股特征除以当日全市场中位数，人为制造出"横截面相对强弱"特征。
+
+    Args:
+        df: 全市场特征 DataFrame（已按 date 排序）
+
+    Returns:
+        新增横截面相对特征列的 DataFrame
+    """
+    if df.empty or 'date' not in df.columns:
+        return df
+
+    result = df.copy()
+    grouped = result.groupby('date')
+
+    # 相对收益率 = 个股收益率 - 当日市场平均收益率
+    if 'ret_1d' in result.columns:
+        daily_mean_ret = grouped['ret_1d'].transform('mean')
+        result['ret_1d_rel'] = result['ret_1d'] - daily_mean_ret
+
+    # 相对波动率 = 个股波动率 / 当日市场中位数波动率
+    for col in ['volatility_5d', 'volatility_10d']:
+        if col in result.columns:
+            daily_median = grouped[col].transform('median')
+            result[f'{col}_rel'] = result[col] / daily_median.replace(0, np.nan)
+
+    # 相对成交量变化
+    if 'vol_change_1d' in result.columns:
+        daily_mean = grouped['vol_change_1d'].transform('mean')
+        result['vol_change_1d_rel'] = result['vol_change_1d'] - daily_mean
+
+    # 相对成交额（除以当日中位数，无量纲化）
+    if 'turnover' in result.columns:
+        daily_median = grouped['turnover'].transform('median')
+        result['turnover_rel'] = result['turnover'] / daily_median.replace(0, np.nan)
+
+    # 相对日内振幅
+    if 'amplitude' in result.columns:
+        daily_mean = grouped['amplitude'].transform('mean')
+        result['amplitude_rel'] = result['amplitude'] - daily_mean
+
+    # 相对收盘留影
+    if 'close_shadow' in result.columns:
+        daily_mean = grouped['close_shadow'].transform('mean')
+        result['close_shadow_rel'] = result['close_shadow'] - daily_mean
+
+    return result.dropna()
+
+
 def _build_feature_label_dataframe(
     df: pd.DataFrame, lookahead: int
 ) -> Tuple[pd.DataFrame, list]:
@@ -201,8 +269,12 @@ def _build_feature_label_dataframe(
     full = pd.concat(results, ignore_index=True)
     full = full.sort_values('date').reset_index(drop=True)
 
+    # 添加横截面相对特征（全市场合并后计算）
+    full = _add_cross_sectional_features(full)
+
     # 确定实际可用的特征列
     available_features = [c for c in DEFAULT_FEATURE_COLS if c in full.columns]
+    available_features.extend([c for c in CROSS_SECTIONAL_FEATURES if c in full.columns])
     return full, available_features
 
 
@@ -316,7 +388,7 @@ def train_model(lookahead: int = 5) -> dict:
         return {'error': 'xgboost 未安装'}
 
     model = xgb.XGBRanker(
-        n_estimators=500,
+        n_estimators=200,
         max_depth=5,
         learning_rate=0.05,
         tree_method='hist',
