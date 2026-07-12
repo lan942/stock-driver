@@ -20,7 +20,7 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 from backend.utils.db import get_db
-from backend.models.stock import StockDaily
+from backend.models.stock import Stock, StockDaily
 from backend.services.ml.feature_engine import build_features
 from backend.services.ml.label_generator import assign_labels, compute_future_returns
 
@@ -53,10 +53,11 @@ def _detect_gpu() -> bool:
 
 
 def _load_stock_daily_data() -> pd.DataFrame:
-    """从数据库加载全量 StockDaily 数据"""
+    """从数据库加载全量 StockDaily 数据（含股票名称用于 ST 识别）"""
     db = next(get_db())
     rows = (
-        db.query(StockDaily)
+        db.query(StockDaily, Stock.name)
+        .outerjoin(Stock, StockDaily.code == Stock.code)
         .order_by(StockDaily.date.asc())
         .all()
     )
@@ -67,32 +68,40 @@ def _load_stock_daily_data() -> pd.DataFrame:
 
     records = []
     for r in rows:
+        daily, name = r
         records.append({
-            'code': r.code,
-            'date': r.date,
-            'open': r.open,
-            'high': r.high,
-            'low': r.low,
-            'close': r.close,
-            'volume': r.volume,
-            'change_percent': r.change_percent,
+            'code': daily.code,
+            'name': name or '',
+            'date': daily.date,
+            'open': daily.open,
+            'high': daily.high,
+            'low': daily.low,
+            'close': daily.close,
+            'volume': daily.volume,
+            'change_percent': daily.change_percent,
         })
 
     df = pd.DataFrame(records)
     return df
 
 
-def _get_limit_pct(code: str) -> float:
-    """根据股票代码前缀返回涨跌停比例阈值（留 0.1% 容差）
+def _get_limit_pct(code: str, name: str = '') -> float:
+    """根据股票代码前缀和名称返回涨跌停比例阈值（留 0.1% 容差）
 
     Args:
         code: 股票代码，如 '600519'、'300750'、'688981'
+        name: 股票名称，用于识别 ST/*ST 股票
 
     Returns:
-        涨跌停比例阈值
+        涨跌停比例阈值（百分比）
     """
     if not isinstance(code, str) or len(code) < 2:
         return 9.9
+
+    name_upper = str(name).upper() if name else ''
+    if 'ST' in name_upper:
+        return 4.9  # ST/*ST 股票 5%
+
     if code.startswith(('30', '68')):
         return 19.9  # 创业板、科创板 20%
     if code.startswith(('8', '4')):
@@ -101,10 +110,15 @@ def _get_limit_pct(code: str) -> float:
 
 
 def _filter_limit_up_down(df: pd.DataFrame) -> pd.DataFrame:
-    """排除涨跌停日数据（按板块使用不同涨跌停阈值）"""
+    """排除涨跌停日数据（按板块和是否 ST 使用不同涨跌停阈值）"""
     if 'change_percent' not in df.columns or 'code' not in df.columns:
         return df
+
     limit_pct = df['code'].map(_get_limit_pct)
+    if 'name' in df.columns:
+        st_mask = df['name'].str.upper().str.contains('ST', na=False)
+        limit_pct = limit_pct.where(~st_mask, 4.9)
+
     mask = ~(
         (df['change_percent'] >= limit_pct) |
         (df['change_percent'] <= -limit_pct)

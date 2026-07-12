@@ -23,17 +23,23 @@
 import pandas as pd
 
 
-def _get_limit_up_pct(code: str) -> float:
-    """根据股票代码前缀返回涨停比例阈值（留 0.2% 容差）
+def _get_limit_up_pct(code: str, name: str = '') -> float:
+    """根据股票代码前缀和名称返回涨停比例阈值（留 0.2% 容差）
 
     Args:
         code: 股票代码，如 '600519'、'300750'、'688981'
+        name: 股票名称，用于识别 ST/*ST 股票
 
     Returns:
         涨停比例阈值，达到即视为涨停
     """
     if not isinstance(code, str) or len(code) < 2:
         return 0.098
+
+    name_upper = str(name).upper() if name else ''
+    if 'ST' in name_upper:
+        return 0.048  # ST/*ST 股票 5%
+
     if code.startswith(('30', '68')):
         return 0.198  # 创业板、科创板 20%
     if code.startswith(('8', '4')):
@@ -73,7 +79,13 @@ def compute_future_returns(df: pd.DataFrame, lookahead: int = 5) -> pd.DataFrame
     # 判定 T+1 是否涨停：open_{t+1} / close_t - 1 >= 涨停阈值 → 一字板，无法买入
     t1_open_ret = df['open'].shift(-1) / df['close'] - 1
     if 'code' in df.columns:
-        limit_up_pct = df['code'].map(_get_limit_up_pct)
+        if 'name' in df.columns:
+            limit_up_pct = df.apply(
+                lambda row: _get_limit_up_pct(row['code'], row['name']),
+                axis=1
+            )
+        else:
+            limit_up_pct = df['code'].map(_get_limit_up_pct)
     else:
         limit_up_pct = 0.098
 
