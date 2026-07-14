@@ -54,11 +54,10 @@ def compute_future_returns(
     lookahead: int = 5,
     stop_profit_pct: float = 0.06,
     stop_loss_pct: float = 0.03,
-    force_close_method: str = 'day_n_close',
     dynamic_sell_enabled: bool = True,
     dynamic_sell_decline_days: int = 2,
 ) -> pd.DataFrame:
-    """计算未来收益率（含动态止盈止损模拟 + 动态评分离场）并剔除 T+1 一字板样本（per-stock）
+    """计算未来收益率（含止盈止损模拟 + 动态评分离场）并剔除 T+1 一字板样本（per-stock）
 
     在 build_features 之后调用。返回带 'future_ret' 和 '_limit_down_exit' 列的 DataFrame（已 dropna）。
     不分配 label —— label 需要在全市场数据合并后通过 assign_labels 截面分配。
@@ -66,36 +65,32 @@ def compute_future_returns(
     T+1 一字涨停的样本会被剔除：实盘中无法以涨停价买入，
     保留这些样本会让模型学到虚假的"神仙球"收益。
 
-    模拟离场路径（按优先级）：
+    模拟离场路径（与回测引擎逻辑一致）：
     - T+1 开盘买入
-    - T+1 至 T+lookahead 逐日扫描 high/low
-    - 最高价触及止盈线 → 当日以 high 卖出（扣除摩擦成本）
-    - 最低价触及止损线 → 当日以 low 卖出（扣除摩擦成本）
-    - 持仓期间日收益连续为负 N 天 → 当日收盘卖出（模拟「逻辑破坏」动态离场）
-    - 未触发 → 强制时间平仓（见 force_close_method）
+    - T+1 至 T+lookahead 逐日扫描：
+      * 日内止损：最低价触及止损线 → 当日以 low 卖出（唯一日内操作）
+      * 收盘后止盈：收盘价 >= 止盈线 → 次日开盘价卖出
+      * 收盘后动态离场：连续 N 天日收益为负 → 次日开盘价卖出
+    - 未触发 → 强制时间平仓：T+lookahead+1 开盘价卖出
+
+    实盘对应：
+    - 日内只挂止损条件单（min(百分比止损, ATR止损)），触发即成交
+    - 收盘后冷静评估止盈/模型置信度/超时，次日集合竞价挂单卖出
 
     动态评分离场（逻辑闭环）：
     - 实盘策略中每天对持仓股票用模型重新评分，分数恶化即卖出
     - 标签生成时无模型可用，用日收益率作为代理：连续 N 天日收益为负 = 模型置信度下降
-    - 这确保训练标签的离场路径和策略一致
 
     一字跌停离场处理：
     - 离场日如果开盘≈最高≈最低≈收盘（完全锁死），判定为一字跌停
     - 尝试顺延一天以次日开盘价卖出
     - 如果次日仍锁死，标记 _limit_down_exit=True（assign_labels 会强制惩罚）
 
-    强制时间平仓（确保模型学习的时间周期与实盘策略完全一致）：
-    - day_n_close: 第 T+lookahead 天的收盘价（默认）
-    - day_n_plus_1_open: 第 T+lookahead+1 天的开盘价
-
     Args:
         df: 包含 'close', 'open', 'high', 'low' 列的特征 DataFrame（单只股票）
         lookahead: 预测窗口，未来 N 个交易日，默认 5
         stop_profit_pct: 止盈比例，默认 6%
         stop_loss_pct: 止损比例，默认 3%
-        force_close_method: 强制平仓方式
-            - 'day_n_close': 第 N 天收盘价（默认）
-            - 'day_n_plus_1_open': 第 N+1 天开盘价
         dynamic_sell_enabled: 是否启用动态评分离场模拟，默认 True
         dynamic_sell_decline_days: 连续日收益为负的天数阈值，默认 2
 
@@ -109,7 +104,7 @@ def compute_future_returns(
         if col not in df.columns:
             raise ValueError(f"DataFrame 缺少 '{col}' 列")
 
-    required_future_days = lookahead + 2 if force_close_method == 'day_n_plus_1_open' else lookahead + 1
+    required_future_days = lookahead + 2  # +1 天用于次日开盘卖出，+1 天用于一字跌停顺延
     if len(df) <= required_future_days:
         return pd.DataFrame()
 
@@ -142,8 +137,7 @@ def compute_future_returns(
     name_for_limit = df['name'].iloc[0] if 'name' in df.columns else ''
     board_limit_down_pct = _get_limit_up_pct(code_for_limit, name_for_limit)
 
-    # 模拟动态止盈止损离场路径
-    # 构建未来 lookahead+2 天的价格矩阵（+1 天用于 day_n_plus_1_open，再 +1 天用于一字跌停顺延卖出）
+    # 构建未来 lookahead+2 天的价格矩阵（+1 天用于次日开盘卖出，再 +1 天用于一字跌停顺延卖出）
     future_high = []
     future_low = []
     future_close = []
@@ -192,21 +186,23 @@ def compute_future_returns(
             if pd.isna(high_t) or pd.isna(low_t) or pd.isna(close_t):
                 continue
 
-            # 触及止盈
-            if high_t >= stop_profit_price:
-                exit_price = high_t
-                exit_day_idx = i
-                exited = True
-                break
-
-            # 触及止损
+            # 1. 日内止损：low 触及止损线 → 当日以 low 卖出（唯一日内操作）
             if low_t <= stop_loss_price:
                 exit_price = low_t
                 exit_day_idx = i
                 exited = True
                 break
 
-            # 动态评分离场检测：日收益为负 → 置信度下降
+            # 2. 收盘后止盈：收盘价 >= 止盈线 → 次日开盘价卖出
+            if close_t >= stop_profit_price:
+                next_open = future_open_df.iloc[pos, i + 1]
+                if not pd.isna(next_open):
+                    exit_price = next_open
+                    exit_day_idx = i + 1
+                    exited = True
+                    break
+
+            # 3. 动态评分离场检测：日收益为负 → 次日开盘价卖出
             if dynamic_sell_enabled:
                 if prev_close is not None and prev_close > 0:
                     day_return = close_t / prev_close - 1
@@ -216,21 +212,19 @@ def compute_future_returns(
                         consecutive_negative = 0
 
                     if consecutive_negative >= dynamic_sell_decline_days:
-                        exit_price = close_t
-                        exit_day_idx = i
-                        exited = True
-                        break
+                        next_open = future_open_df.iloc[pos, i + 1]
+                        if not pd.isna(next_open):
+                            exit_price = next_open
+                            exit_day_idx = i + 1
+                            exited = True
+                            break
 
                 prev_close = close_t
 
-        # 未触发，到期强制平仓
+        # 未触发，强制时间平仓：T+lookahead+1 开盘价卖出
         if not exited:
-            if force_close_method == 'day_n_plus_1_open':
-                exit_day_idx = lookahead
-                exit_price = future_open_df.iloc[pos, lookahead]
-            else:
-                exit_day_idx = lookahead - 1
-                exit_price = future_close_df.iloc[pos, lookahead - 1]
+            exit_day_idx = lookahead
+            exit_price = future_open_df.iloc[pos, lookahead]
 
         # 检测离场日是否为一字跌停（实盘无法卖出）
         limit_down_exit = False

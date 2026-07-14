@@ -1,26 +1,37 @@
 ## 1. 策略模块扩展
 
-- [ ] 1.1 在 `ml_strategy.py` 中添加 `score_stock_for_sell(code, buy_date)` 方法，基于买入日期之后的最新数据重新评分
-- [ ] 1.2 在 `strategy_config.py` 中添加 `dynamic_sell_score_threshold` 配置项（默认0.5）
+- [x] 1.1 全市场批量评分 `_score_all_market_stocks()` 用于买入和卖出检测
+- [x] 1.2 动态卖出评分阈值配置（percentile / decline_days / absolute / min_hold_days）
 
 ## 2. 回测引擎修改
 
-- [ ] 2.1 修改 `strategy_backtest.py` 的 `_check_sell_for_day()` 方法，添加动态评分卖出判断逻辑
-- [ ] 2.2 更新卖出原因类型：`sold` 拆分为 `take_profit` 和 `stop_loss`，新增 `dynamic_score`
-- [ ] 2.3 实现卖出优先级：止损 > 止盈 > 动态评分
+- [x] 2.1 拆分 `_check_sell_for_day` 为 `_check_intraday_stop_loss`（日内止损）和 `_check_close_triggers`（收盘后评估）
+- [x] 2.2 新增 `pending_sells` 队列，止盈/超时/动态评分收盘后评估、次日开盘价卖出
+- [x] 2.3 买入去掉1%涨跌幅限制，T+1 开盘直接成交
+- [x] 2.4 清仓阶段同步使用新的卖出逻辑
+- [x] 2.5 移除 `force_close_method` 配置（统一使用次日开盘价）
 
-## 3. 数据模型更新
+## 3. 训练标签同步
 
-- [ ] 3.1 在 `BacktestTransaction` 模型中添加 `sell_reason` 字段（支持 take_profit/stop_loss/dynamic_score）
-- [ ] 3.2 数据库迁移：添加 sell_reason 列
+- [x] 3.1 `compute_future_returns` 离场路径同步更新（止损=当日low卖，止盈/动态/超时=次日开盘卖）
+- [x] 3.2 移除 `force_close_method` 参数，统一次日开盘价平仓
+- [x] 3.3 `xgboost_trainer.py` 移除 `force_close_method` 调用
 
-## 4. 前端展示
+## 4. 配置更新
 
-- [ ] 4.1 更新 `StrategyBoard.vue`，在交易记录中展示卖出原因
-- [ ] 4.2 更新回测结果页面，展示不同卖出原因的统计
+- [x] 4.1 `max_hold_days` 描述更新为"超过后次日开盘卖出"
+- [x] 4.2 移除 `force_close_method` 默认配置
 
-## 5. 测试验证
+## 5. OpenSpec 文档同步
 
-- [ ] 5.1 运行回测验证动态评分卖出功能正常工作
-- [ ] 5.2 验证止盈止损底线保护机制生效
-- [ ] 5.3 验证卖出原因正确记录
+- [x] 5.1 更新 `stop-profit-loss-floor` spec
+- [x] 5.2 更新 `xgboost-dynamic-score-sell` spec
+- [x] 5.3 更新 `ml-label-generator` spec
+- [x] 5.4 更新 `ml-strategy` spec
+- [x] 5.5 更新 `design.md` 和 `proposal.md`
+
+## 6. 测试验证
+
+- [ ] 6.1 重新训练模型（标签逻辑已变）
+- [ ] 6.2 运行回测验证新买卖逻辑
+- [ ] 6.3 对比新旧回测结果差异

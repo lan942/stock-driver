@@ -1,7 +1,8 @@
 # ml-strategy Specification
 
 ## Purpose
-TBD - created by archiving change add-xgboost-ml-strategy. Update Purpose after archive.
+XGBoost ML 策略：使用 XGBoost Ranker（rank:pairwise）对全市场股票进行排序学习，每日收盘后评分选股，T+1 开盘买入，持仓期间通过日内止损 + 收盘后评估机制管理卖出。
+
 ## Requirements
 ### Requirement: 实现 IStrategy 接口
 ML 策略类 `XGBoostStrategy` SHALL 实现 `IStrategy` 接口，提供 `score_stock()` 和 `generate_recommendations()` 方法。
@@ -45,10 +46,43 @@ ML 策略类 `XGBoostStrategy` SHALL 实现 `IStrategy` 接口，提供 `score_s
 - **WHEN** 股票交易数据不足 60 个交易日
 - **THEN** 返回 `None`
 
-### Requirement: 生成买入推荐
-`generate_recommendations(available_slots, available_cash)` SHALL 遍历所有股票，调用 `score_stock()` 评分后按 `total_score` 降序排列，生成买入推荐清单。推荐逻辑 SHALL 与现有策略一致（仓位计算、止盈止损、资金检查）。
+### Requirement: 买入规则（T日评分，T+1 开盘买入）
+回测引擎 SHALL 在每个交易日收盘后执行全市场评分，按评分降序选出得分 >= 自适应门槛的股票，次日以开盘价买入。不设涨跌幅限制——无论 T+1 开盘相比 T 日收盘高开多少，均以 T+1 开盘价成交。
 
-#### Scenario: 正常生成推荐
-- **WHEN** `available_slots=3`, `available_cash=100000`
-- **THEN** 返回最多 3 条推荐，按评分降序，包含 `suggested_buy_price`, `target_price`, `stop_price`
+#### Scenario: T+1 开盘买入
+- **WHEN** T 日收盘评分选出股票 A
+- **THEN** T+1 日以开盘价买入 A，不限涨跌幅
 
+### Requirement: 卖出规则（日内止损 + 收盘后评估）
+卖出执行 SHALL 分为两类：
+
+**日内止损**（唯一日内操作）：
+- 挂单 min(ATR 止损, 百分比止损)，当日 low 触及即成交
+- `_check_intraday_stop_loss` 方法实现
+
+**收盘后评估**（止盈/超时/动态评分）：
+- 收盘后评估，触发后加入 `pending_sells` 队列
+- 次交易日以开盘价卖出
+- `_check_close_triggers` 方法实现
+
+#### Scenario: 日内止损卖出
+- **WHEN** 持仓股票当日 low 触及止损线
+- **THEN** 当日以止损价卖出，原因类型为 `stop_loss` 或 `atr_loss`
+
+#### Scenario: 收盘后止盈评估
+- **WHEN** 持仓股票收盘价 >= 止盈线
+- **THEN** 次交易日以开盘价卖出，原因类型为 `take_profit` 或 `atr_profit`
+
+#### Scenario: 超时卖出
+- **WHEN** 持仓交易日数达到 max_hold_days
+- **THEN** 次交易日以开盘价卖出，原因类型为 `timeout`
+
+#### Scenario: 动态评分卖出
+- **WHEN** 收盘后评分恶化（百分位/连续下降/绝对阈值）
+- **THEN** 次交易日以开盘价卖出，原因类型为 `dynamic_score_low` 或 `dynamic_score_decline`
+
+### Requirement: 实盘可操作设计
+本策略的买卖规则设计为实盘可操作：
+- 买入：T 日收盘后模型评分，T+1 日集合竞价挂单买入——不需要盯盘
+- 日内操作：只挂一笔止损条件单——券商支持
+- 其余卖出：收盘后评估，次日集合竞价挂单——不需要盯盘
